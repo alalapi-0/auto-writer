@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime  # 定义时间戳字段默认值
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text  # 导入 ORM 字段类型
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text  # 导入 ORM 字段类型
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship  # ORM 基类与类型标注
 
 
@@ -63,3 +63,19 @@ class RunRecord(Base):
         DateTime, default=datetime.utcnow, nullable=False
     )  # 记录创建时间
     article: Mapped[Article | None] = relationship("Article", back_populates="runs")  # 反向关联文章
+
+
+class PsychologyTheme(Base):
+    """存储心理学关键词与影视角色组合，供文章生成调用。"""
+
+    __tablename__ = "psychology_themes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键 id
+    psychology_keyword: Mapped[str] = mapped_column(String(128), nullable=False)  # 心理学关键词
+    psychology_definition: Mapped[str] = mapped_column(String(255), nullable=False)  # 概念定义
+    character_name: Mapped[str] = mapped_column(String(128), nullable=False)  # 影视角色名称
+    show_name: Mapped[str] = mapped_column(String(128), nullable=False)  # 影视剧名称
+    used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # 是否已被使用
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )  # 创建时间

@@ -19,3 +19,13 @@ CREATE TABLE IF NOT EXISTS runs ( -- 记录每次运行状态
     detail TEXT, -- 运行详情或错误信息
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP -- 记录创建时间
 );
+
+CREATE TABLE IF NOT EXISTS psychology_themes ( -- 心理学主题库
+    id INTEGER PRIMARY KEY AUTOINCREMENT, -- 自增主键
+    psychology_keyword VARCHAR(128) NOT NULL, -- 心理学关键词
+    psychology_definition VARCHAR(255) NOT NULL, -- 概念定义
+    character_name VARCHAR(128) NOT NULL, -- 角色名称
+    show_name VARCHAR(128) NOT NULL, -- 影视剧名称
+    used BOOLEAN NOT NULL DEFAULT 0, -- 是否已被使用
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP -- 记录创建时间
+);
