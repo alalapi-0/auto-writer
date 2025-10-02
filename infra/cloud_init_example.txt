@@ -1,0 +1,9 @@
+#cloud-config
+# VPS 初始化示例脚本，仅供参考，不含真实密钥。
+package_update: true
+package_upgrade: true
+runcmd:
+  - echo "AutoWriter runtime bootstrap" >/var/log/autowriter-bootstrap.log
+  - mkdir -p /home/ubuntu/autowriter_run
+  - chown ubuntu:ubuntu /home/ubuntu/autowriter_run
+  - pip install --no-cache-dir -r /home/ubuntu/autowriter_run/runtime_requirements.txt

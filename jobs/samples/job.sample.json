@@ -1,0 +1,11 @@
+{
+  "run_id": "2025-10-02-090000",
+  "run_date": "2025-10-02",
+  "planned_articles": 2,
+  "topics": [
+    {"character_name": "夏洛克", "work": "神探夏洛克", "keyword": "行为主义"},
+    {"character_name": "张超", "work": "隐秘的角落", "keyword": "道德两难"}
+  ],
+  "template_options": {"style": "psychology_analysis"},
+  "delivery_targets": {"wordpress": true, "medium": true, "wechat": false}
+}

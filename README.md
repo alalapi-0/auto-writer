@@ -194,3 +194,41 @@ make run
 
 ---
 如需更多帮助，请在 Issue 中反馈或加入后续讨论。
+## 13. 本轮架构更新（本机持久库 + VPS 无状态）
+### 架构概览
+- **本机常驻**：持久化数据库仅存在于本机（默认 SQLite，可切换 PostgreSQL）。负责选题规划、used_pairs 去重、runs 统计与关键词池维护。
+- **VPS 临时实例**：每日临时创建，仅读取传入的 `job.json` 与 `.env.runtime`，执行完立刻销毁或由本机回收，不持久化任何密钥。
+
+### 数据流
+1. 本机 orchestrator 读取数据库与配置，计算当日目标篇数。
+2. Planner 选取「未用或冷却窗外」关键词，并根据角色 traits 匹配角色。
+3. Preflight 去重：优先检查 `used_pairs` 当日重复，其次预留相似度哈希占位。
+4. 生成 `job.json` 与 `.env.runtime`（纯文本）并通过 SSH 传至 VPS 临时目录。
+5. VPS 执行 `app/worker/remote_worker.py` 渲染草稿并投递草稿箱，返回 `result.json` 与 `worker.log.txt`。
+6. 本机回收结果，落库更新 runs/used_pairs/platform_logs，并触发 “3 消耗 3 补齐” 的热度补全。
+
+### 密钥生命周期与最小暴露
+- 所有长期密钥仅保存在本机 `.env` 中。
+- 打包阶段生成一次性的 `.env.runtime`，只包含当次投递所需的凭据。
+- VPS worker 运行结束后主动删除 `.env.runtime`，orchestrator 也会在回收阶段触发删除。
+
+### 失败重试与容错
+- 若 VPS 执行失败，可在本机保留 `job.json` 并重新触发；未成功的 run 仍标记为 `scheduled` 方便次日继续。
+- 日志与 `result.json` 全部回传，本机可根据 `runs.status` 与 `platform_logs` 判断是否需要补投。
+
+### 运行示例
+```bash
+# 本机一次性执行
+python app/orchestrator/orchestrator.py --date 2025-10-02 --articles 3
+
+# 或使用 Makefile（支持 DATE/ARTICLES 环境变量）
+make run-local-orchestrator DATE=2025-10-02 ARTICLES=3
+```
+
+### 数据与仓库约束
+- 仓库保持纯文本，严禁提交 `.db`、缓存或其他二进制产物。
+- `jobs/job.schema.json` 提供统一 Schema，所有作业必须遵循。
+
+### SSH 最小权限说明
+- 建议为 orchestrator 使用仅限目标 IP 的密钥对，并限制命令执行范围。
+- VPS 临时目录（默认为 `/home/ubuntu/autowriter_run`）需具备最小读写权限，执行完成后应清理残留文件。

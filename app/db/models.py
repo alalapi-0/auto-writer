@@ -1,81 +1,178 @@
 """定义数据库 ORM 模型。
 
-模型涵盖文章、关键词以及运行记录表，每个字段都附带中文注释说明用途。
+模型覆盖角色、关键词、运行记录等核心表结构，全部字段均附带中文注释说明用途。
 """
 
 from __future__ import annotations
 
-from datetime import datetime  # 定义时间戳字段默认值
+from datetime import datetime, date  # 处理时间字段
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text  # 导入 ORM 字段类型
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship  # ORM 基类与类型标注
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
     """SQLAlchemy 基类，供所有模型继承。"""
 
 
-class Article(Base):
-    """文章实体模型，记录生成的正文与关键词关联。"""
+class TimestampMixin:
+    """统一的创建/更新时间字段。"""
 
-    __tablename__ = "articles"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键自增 id
-    title: Mapped[str] = mapped_column(String(255), nullable=False)  # 文章标题
-    content: Mapped[str] = mapped_column(Text, nullable=False)  # 文章正文内容
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )  # 创建时间，默认当前 UTC
-    keywords: Mapped[list["Keyword"]] = relationship(
-        "Keyword", back_populates="article", cascade="all, delete-orphan"
-    )  # 关联关键词，删除文章时级联删除关键词
-    runs: Mapped[list["RunRecord"]] = relationship(
-        "RunRecord", back_populates="article", cascade="all, delete-orphan"
-    )  # 关联运行记录
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )  # 更新时间，每次写入自动刷新
+
+
+class Character(Base):
+    """主角色库，收录心理学分析常用角色。"""
+
+    __tablename__ = "characters"
+    __table_args__ = (UniqueConstraint("name", "work", name="uq_character_name_work"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键 id
+    name: Mapped[str] = mapped_column(String(128), nullable=False)  # 角色名称
+    work: Mapped[str] = mapped_column(String(128), nullable=False)  # 作品名称
+    traits: Mapped[str] = mapped_column(Text, nullable=False)  # 角色心理/性格特质，JSON 或逗号分隔字符串
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )  # 创建时间
+
+
+class ExtendedCharacter(Base):
+    """扩展角色库，用于补充临时引入的角色。"""
+
+    __tablename__ = "extended_characters"
+    __table_args__ = (
+        UniqueConstraint("name", "work", name="uq_extended_character_name_work"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键 id
+    name: Mapped[str] = mapped_column(String(128), nullable=False)  # 角色名称
+    work: Mapped[str] = mapped_column(String(128), nullable=False)  # 作品名称
+    traits: Mapped[str] = mapped_column(Text, nullable=False)  # 心理特质描述
+    source: Mapped[str] = mapped_column(String(128), nullable=True)  # 数据来源说明，可为空
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )  # 创建时间
 
 
 class Keyword(Base):
-    """关键词实体模型。
-
-    将文章与多个关键词建立多对一关系，为去重算法提供历史词库。
-    """
+    """关键词表，记录心理学主题词及其使用情况。"""
 
     __tablename__ = "keywords"
+    __table_args__ = (UniqueConstraint("keyword", name="uq_keyword_value"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键 id
-    article_id: Mapped[int] = mapped_column(ForeignKey("articles.id"), nullable=False)  # 文章外键
-    keyword: Mapped[str] = mapped_column(String(128), nullable=False)  # 关键词内容
-    article: Mapped[Article] = relationship("Article", back_populates="keywords")  # 反向关联文章
-
-
-class RunRecord(Base):
-    """记录每次生成与投递任务的运行状态。"""
-
-    __tablename__ = "runs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键 id
-    article_id: Mapped[int | None] = mapped_column(
-        ForeignKey("articles.id"), nullable=True
-    )  # 关联的文章 id，可为空表示失败
-    status: Mapped[str] = mapped_column(String(32), nullable=False)  # 运行状态，如 success/failed
-    detail: Mapped[str | None] = mapped_column(Text, nullable=True)  # 运行详情或错误信息
+    keyword: Mapped[str] = mapped_column(String(128), nullable=False)  # 关键词文本
+    category: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 可选分类
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 最近使用时间
+    usage_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 使用次数累计
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)  # 是否仍可用
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
-    )  # 记录创建时间
-    article: Mapped[Article | None] = relationship("Article", back_populates="runs")  # 反向关联文章
+    )  # 创建时间
 
 
-class PsychologyTheme(Base):
-    """存储心理学关键词与影视角色组合，供文章生成调用。"""
+class Run(Base):
+    """一次 orchestrator 执行的聚合记录。"""
 
-    __tablename__ = "psychology_themes"
+    __tablename__ = "runs"
+    __table_args__ = (UniqueConstraint("run_id", name="uq_run_run_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键 id
-    psychology_keyword: Mapped[str] = mapped_column(String(128), nullable=False)  # 心理学关键词
-    psychology_definition: Mapped[str] = mapped_column(String(255), nullable=False)  # 概念定义
-    character_name: Mapped[str] = mapped_column(String(128), nullable=False)  # 影视角色名称
-    show_name: Mapped[str] = mapped_column(String(128), nullable=False)  # 影视剧名称
-    used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # 是否已被使用
+    run_id: Mapped[str] = mapped_column(String(64), nullable=False)  # 运行唯一标识
+    run_date: Mapped[date] = mapped_column(Date, nullable=False)  # 运行对应日期
+    planned_articles: Mapped[int] = mapped_column(Integer, nullable=False)  # 计划文章数
+    keywords_consumed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 已消耗关键词数量
+    keywords_added: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 事后补充数量
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)  # 状态字段
+    metadata_path: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 记录 job.json 路径
+    result_path: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 记录 result.json 路径
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )  # 创建时间
+
+    articles: Mapped[list["ArticleDraft"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )  # 反向关联文章草稿
+
+
+class ArticleDraft(Base):
+    """记录某次运行生成的文章草稿元数据。"""
+
+    __tablename__ = "articles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键 id
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("runs.id"), nullable=True)  # 关联运行表
+    character_name: Mapped[str] = mapped_column(String(128), nullable=False)  # 角色名称
+    work: Mapped[str] = mapped_column(String(128), nullable=False)  # 作品名称
+    keyword: Mapped[str] = mapped_column(String(128), nullable=False)  # 对应关键词
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 草稿标题，可为空
+    status: Mapped[str] = mapped_column(String(32), default="draft", nullable=False)  # 草稿状态
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)  # 生成的正文内容
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )  # 创建时间
+
+    run: Mapped[Run | None] = relationship("Run", back_populates="articles")  # 反向引用
+    platform_logs: Mapped[list["PlatformLog"]] = relationship(
+        back_populates="article", cascade="all, delete-orphan"
+    )  # 关联平台投递记录
+
+
+class PlatformLog(Base):
+    """记录投递到各平台的结果日志。"""
+
+    __tablename__ = "platform_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键 id
+    article_id: Mapped[int] = mapped_column(
+        ForeignKey("articles.id"), nullable=False
+    )  # 关联文章草稿
+    platform: Mapped[str] = mapped_column(String(64), nullable=False)  # 平台名称
+    ok: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # 是否成功
+    id_or_url: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 返回的草稿 id 或链接
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)  # 错误信息
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )  # 记录时间
+
+    article: Mapped[ArticleDraft] = relationship("ArticleDraft", back_populates="platform_logs")  # 反向引用
+
+
+class UsedPair(Base):
+    """记录 (角色, 作品, 关键词) 的使用历史，用于去重。"""
+
+    __tablename__ = "used_pairs"
+    __table_args__ = (
+        UniqueConstraint(
+            "character_name",
+            "work",
+            "keyword",
+            "used_on",
+            name="uq_used_pair_unique_day",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键 id
+    character_name: Mapped[str] = mapped_column(String(128), nullable=False)  # 角色名称
+    work: Mapped[str] = mapped_column(String(128), nullable=False)  # 作品名称
+    keyword: Mapped[str] = mapped_column(String(128), nullable=False)  # 使用的关键词
+    run_id: Mapped[str] = mapped_column(String(64), nullable=False)  # 对应运行 ID
+    used_on: Mapped[date] = mapped_column(Date, nullable=False)  # 使用日期
+    similarity_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 相似度哈希占位
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )  # 创建时间
