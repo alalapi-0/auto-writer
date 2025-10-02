@@ -1,0 +1,35 @@
+[tool.poetry]
+name = "auto-writer"
+version = "0.1.0"
+description = "Automated daily article generator and draft delivery framework."
+authors = ["AutoWriter Maintainers <dev@example.com>"]
+readme = "README.md"
+packages = [{ include = "app" }, { include = "config" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+apscheduler = "^3.10.4"
+python-dotenv = "^1.0.1"
+sqlalchemy = "^2.0.30"
+structlog = "^24.1.0"
+requests = "^2.31.0"
+playwright = "^1.44.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.0"
+ruff = "^0.4.0"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+select = ["E", "F", "I", "N", "W"]
+ignore = []
+exclude = [
+    ".venv",
+    "build",
+    "dist",
+]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
