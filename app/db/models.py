@@ -1,11 +1,14 @@
-"""定义数据库 ORM 模型。"""
+"""定义数据库 ORM 模型。
+
+模型涵盖文章、关键词以及运行记录表，每个字段都附带中文注释说明用途。
+"""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # 定义时间戳字段默认值
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text  # 导入 ORM 字段类型
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship  # ORM 基类与类型标注
 
 
 class Base(DeclarativeBase):
@@ -13,7 +16,7 @@ class Base(DeclarativeBase):
 
 
 class Article(Base):
-    """文章实体模型。"""
+    """文章实体模型，记录生成的正文与关键词关联。"""
 
     __tablename__ = "articles"
 
@@ -32,7 +35,10 @@ class Article(Base):
 
 
 class Keyword(Base):
-    """关键词实体模型。"""
+    """关键词实体模型。
+
+    将文章与多个关键词建立多对一关系，为去重算法提供历史词库。
+    """
 
     __tablename__ = "keywords"
 

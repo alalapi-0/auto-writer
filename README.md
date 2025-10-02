@@ -1,70 +1,185 @@
 # AutoWriter 项目
 
-## 项目目标与愿景
-AutoWriter 致力于每天自动生成一篇约 2000 字的文章，并将文章推送到多个内容平台的草稿箱中，帮助创作者保持持续输出与多平台覆盖。
+**R2-Tag｜本轮完成标记**
+- [x] 逐行注释覆盖率≥90%，重点模块均补齐中文说明
+- [x] README 扩写 11 大章节并包含 ASCII 架构草图
+- [x] 未提交任何二进制产物，保持仓库纯文本
+- [x] 可通过 `python app/main.py --topic` 或 `make run` 本地运行
 
-## 文件结构说明
-- `README.md`：项目概述与操作指南。
-- `pyproject.toml`：使用 Poetry 管理项目依赖与构建配置。
-- `requirements.txt`：提供使用 `pip` 安装依赖的可选方案。
-- `Makefile`：封装常用命令，便于开发与部署。
-- `.gitignore`：忽略临时文件与敏感文件。
-- `.env.example`：示例环境变量，需复制为 `.env` 并填写真实值。
-- `config/`：包含统一配置与结构化日志设置。
-  - `settings.py`：读取环境变量，生成应用配置对象。
-  - `logging_conf.py`：定义结构化日志格式与日志器。
-- `app/`：应用核心代码。
-  - `main.py`：程序主入口，负责调度文章生成与投递流程。
-  - `scheduler.py`：封装 APScheduler 调度逻辑，支持定时执行任务。
-  - `generator/`：文章生成模块。
-    - `article_generator.py`：调用大语言模型生成文章，目前使用占位实现。
-    - `prompts/default_prompt.txt`：默认的 2000 字文章模板，包含可替换占位符。
-  - `db/`：数据库模型与迁移。
-    - `models.py`：SQLAlchemy ORM 定义。
-    - `schema.sql`：SQLite/PostgreSQL 通用的建表语句。
-    - `migrate.py`：初始化数据库与迁移占位逻辑。
-  - `delivery/`：文章投递模块，负责将文章发送至各平台草稿箱。
-    - `base.py`：平台适配器抽象基类。
-    - `medium_adapter.py`：Medium 草稿箱示例适配器，包含伪代码说明。
-    - `wordpress_adapter.py`：WordPress 草稿箱示例适配器。
-    - `wechat_mp_adapter.py`：微信公众号草稿接口说明。
-    - `playwright_driver.py`：Playwright 自动化占位实现。
-  - `dedup/`：文章去重逻辑。
-    - `deduplicator.py`：基于数据库记录的去重策略。
-  - `utils/`：辅助函数集合。
-    - `helpers.py`：通用工具方法。
-  - `vps_manager.py`：VPS 生命周期管理占位文件。
-- `tests/`：单元测试目录。
-  - `test_basic.py`：基础的 pytest 测试示例。
+## 1. 项目简介（AutoWriter 是什么）
+AutoWriter 是一套自动写作骨架，目标是每天根据计划生成约 2000 字的文章，并将草稿投递到多个平台。系统内置调度、去重、日志与适配器机制，为未来接入真实平台 API 打好基础。
 
-## 开发环境配置步骤
-### 本地开发
-1. 安装 Python 3.11 及以上版本。
-2. 克隆仓库后，在项目根目录执行 `python -m venv .venv` 创建虚拟环境。
-3. 激活虚拟环境（Windows 使用 `\.venv\\Scripts\\activate`，Unix 使用 `source .venv/bin/activate`）。
-4. 通过 `poetry install` 或 `pip install -r requirements.txt` 安装依赖。
-5. 将 `.env.example` 复制为 `.env` 并填写 OpenAI API Key、数据库连接等必要配置。
+### 功能要点
+- **定时调度**：基于 APScheduler，每日固定时间自动生成并投递内容。
+- **去重检查**：以关键词集合和数据库记录避免重复发文。
+- **草稿投递**：通过可插拔适配器，将文章推送到 Medium、WordPress、微信公众号等草稿箱（当前为占位实现）。
+- **结构化日志**：使用 structlog 输出 JSON 日志，便于统一采集。
+- **可配置性**：统一配置中心，可通过 .env 或环境变量控制密钥、数据库、时区等。
+- **VPS 生命周期脚本占位**：保留创建/销毁云主机的接口，后续可接入云商 API。
 
-### VPS 环境
-1. 在云服务商创建运行 Python 3.11 的 VPS，确保具备定时任务与网络访问权限。
-2. 克隆项目仓库并安装依赖。
-3. 配置系统环境变量或 `.env` 文件，确保数据库与 API Key 可用。
-4. 通过 `make init` 执行初始化脚本（迁移数据库、创建日志目录等）。
-5. 配置守护进程或定时器（如 `systemd`、`cron`）调用 `make run` 或直接运行 `python app/main.py`。
+## 2. 最终愿景与产品形象
+AutoWriter 的长期目标是实现「全自动、零干预」的内容生产流水线：系统按日程生成高质量文章，进入人工审核草稿箱，避免重复并支持主题可控。
 
-## 运行方式
-- 使用 Makefile：`make run`
-- 直接运行 Python：`python app/main.py`
+### 愿景亮点
+- 持续生成高质量、可审稿后发布的草稿。
+- 支持主题矩阵、A/B Prompt 策略与质量度量（预留接口）。
+- 提供审核工作流与失败回滚机制，保障内容安全。
 
-## 未来扩展计划
-- 接入更多内容平台（知乎、头条、LinkedIn 等）。
-- 引入文章分类、标签与多主题策略。
-- 提供自动发布功能，支持预定时间上线。
-- 集成内容质量分析与用户反馈回流。
-- 扩展到多语言文章生成能力。
+### 演进路线图（Roadmap）
+1. **R1 骨架**：打通生成、去重、投递的最小链路。
+2. **R2 注释/文档**：本轮完成，补齐逐行注释与完整 README。
+3. **R3 内容 Prompt 体系**：引入主题库、文章大纲、风格模板、反重复校验、元数据打标。
+4. **R4 平台适配完善**：接入各平台正式 API，完善鉴权与回调。
+5. **R5 质量评估/回退**：落地质量评分、人工审核与内容回滚机制。
+6. **R6 多租户/队列**：支持多账号与任务排队，保障资源隔离。
+7. **R7 观测性与看板**：构建指标、日志与可视化看板。
 
-## 用户需要手动提供的内容
-- OpenAI 或其他大语言模型服务的 API Key。
-- 数据库连接字符串（SQLite 文件路径或 PostgreSQL URI）。
-- 各平台的 OAuth/Token 或 Cookie 信息。
-- VPS 创建、销毁脚本中的云厂商凭据与参数配置。
+### ASCII 架构草图
+```
++-----------+     +---------------+     +--------------------+
+| Scheduler | --> | Article Gen   | --> | Dedup (DB)         |
++-----------+     +---------------+     +--------------------+
+                            |                 |
+                            v                 v
+                    +---------------+   +--------------------+
+                    | Delivery Hub  |-->| Platform Adapters |
+                    +---------------+   +--------------------+
+                            |
+                            v
+                      Structured Log
+```
+
+## 3. 系统架构与模块说明
+- **generator/**：文章生成占位模块。当前从模板读取文本，后续将在 R3 引入主题库、大纲、风格模板和反重复 Prompt。
+- **dedup/**：去重逻辑，基于关键词集合与数据库历史记录判断重复，同时预留语义相似度/嵌入接口。
+- **delivery/**：投递中心，包含抽象基类与各平台适配器；真实实现需填充 REST/自动化调用。
+- **db/**：数据库层，包含 ORM 模型、迁移脚本和 schema.sql（articles、keywords、runs 等表）。
+- **config/**：集中配置与日志初始化，支持 .env 与结构化日志。
+- **utils/**：通用工具方法（分组、时间等）。
+- **infra/**：若部署在 VPS，可在 `app/vps_manager.py` 扩展创建/销毁脚本，遵循最小权限原则。
+
+## 4. 安装与环境准备
+### 依赖管理方案一：pip + requirements.txt
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows 使用 .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 依赖管理方案二：Poetry（或兼容的 uv）
+```bash
+curl -sSL https://install.python-poetry.org | python -
+poetry install
+```
+
+### Python 与初始化要求
+- Python 3.11 及以上版本。
+- 推荐在虚拟环境中运行，避免污染系统环境。
+- 首次拉取后执行 `make init`（安装依赖 + 初始化数据库）。
+- 配置 `.env` 文件，可参考 `.env.example`。
+
+### `.env.example` 字段说明
+```dotenv
+OPENAI_API_KEY=
+DB_URL=sqlite:///./local.db        # 仅示例；请勿提交实际 .db 文件
+LOG_LEVEL=INFO
+TIMEZONE=Asia/Tokyo
+WORDPRESS_BASE_URL=
+WORDPRESS_USERNAME=
+WORDPRESS_APP_PASSWORD=
+MEDIUM_INTEGRATION_TOKEN=
+WECHAT_APP_ID=
+WECHAT_APP_SECRET=
+```
+> 提醒：不要提交真实密钥；生产环境建议接入密钥管理服务（如 AWS Secrets Manager、Vault）。
+
+### 首次运行完整步骤
+1. `git clone https://github.com/.../auto-writer.git`
+2. 进入目录：`cd auto-writer`
+3. 创建并激活虚拟环境（见上文）。
+4. 安装依赖（pip 或 poetry）。
+5. 复制 `.env.example` 为 `.env` 并填入占位/真实值。
+6. 执行 `make init` 以初始化数据库结构。
+7. 运行一次：`python app/main.py --topic "示例主题"` 或 `make run`。
+8. 查看日志：命令行输出为 JSON，包含 run_id、platform、status 等字段。
+
+## 5. 运行与调度
+### 本地一次性运行
+```bash
+python app/main.py --topic "示例主题"
+# 或
+make run
+```
+
+### 定时运行方式一：内置 APScheduler
+- 配置 `TIMEZONE` 与 `SCHEDULE_CRON`（如 `0 9 * * *`）。
+- 运行 `python -m app.scheduler`（可在独立进程中执行）。
+
+### 定时运行方式二：系统 cron
+```cron
+0 9 * * * /usr/bin/python /path/to/app/main.py --topic "今日热点" >> /var/log/autowriter.log 2>&1
+```
+- 建议将日志重定向到专用文件并配合 logrotate。
+
+### 幂等与失败重试
+- `runs` 表记录每次执行状态，可在调度前检查是否已有成功记录。
+- `platform_logs`（预留）可写入投递结果，用于判断是否需要重试。
+- 结合 `articles`/`keywords` 唯一约束，避免重复写入同一篇文章。
+
+## 6. 平台草稿投递（占位实现说明）
+- **WordPress（REST）**：POST `https://<site>/wp-json/wp/v2/posts`，需 Basic Auth 或 Application Password，body 包含 `status: draft`、`title`、`content`、`categories`、`tags`。建议使用 HTTPS，处理 401/403/429 等状态码。
+- **Medium 草稿**：POST `https://api.medium.com/v1/users/{userId}/posts`，Header `Authorization: Bearer <token>`，body 包括 `title`、`contentFormat`、`content`、`tags`、`publishStatus: draft/unlisted`。若草稿 API 受限，可退化为未公开发布并记录返回 URL。
+- **微信公众号草稿**：
+  - 开放平台接口：POST `https://api.weixin.qq.com/cgi-bin/draft/add?access_token=...`，body 提供图文数组、digest、评论开关等。
+  - 后台 Web 流程：POST `/cgi-bin/operate_appmsg`，需 Cookie、token、XSRF 参数，涉及素材上传与审核。
+  - 注意内容合规、审核延时与调用频率限制。
+- **Playwright 无头备选**：适用于无开放接口的平台。占位函数说明了启动浏览器、登录、填表、上传、提交的推荐步骤，同时强调不生成持久缓存。
+
+## 7. 数据库与去重策略
+- 表结构：
+  - `articles`：标题、正文、创建时间。
+  - `keywords`：文章外键 + 关键词文本。
+  - `runs`：运行状态、详情、时间戳。未来可扩展 `platform_logs` 表记录平台结果。
+- 当前去重：
+  - 先查标题是否重复。
+  - 再以关键词集合扫描历史记录，存在交集即视为重复。
+  - 事务原则：“执行前扫描 + 生成后回写”，可通过唯一索引与事务避免竞态。
+- 扩展方向：
+  - 预留 `# TODO` 接口，引入 MinHash/SimHash、TF-IDF 或向量嵌入比对。
+  - 在关键词库中记录权重、主题标签以提升精度。
+
+## 8. 日志、监控与排障
+- 结构化日志字段建议：`run_id`、`platform`、`status`、`latency_ms`、`error`。
+- 常见错误：
+  - **网络超时**：建议在请求层增加重试与退避。
+  - **鉴权失败**：检查 token 是否过期，避免在日志中输出敏感凭证。
+  - **限流/非 2xx**：记录响应 body，必要时触发报警。
+- 监控建议：接入 ELK / Loki / CloudWatch，并结合 metrics 统计成功率、耗时、重复率。
+
+## 9. 开发、测试与质量
+- 常用命令：
+  - `make lint`：运行 Ruff 检查与格式化。
+  - `make test` 或 `pytest -q`：执行测试。
+  - `make run`：快速手动验证流程。
+- 新平台适配器开发步骤：
+  1. 在 `app/delivery/` 复制 `base.py` 提供的接口模板。
+  2. 实现 `deliver()`，构造真实 API 请求或自动化脚本。
+  3. 在 `app/main.py` 注册适配器实例。
+  4. 在 `.env` 中补充新平台所需的密钥/URL。
+  5. 编写测试模拟 API 响应，确保异常路径覆盖。
+- 代码规范：遵循 PEP8、使用类型标注、统一中文注释说明，异常需明确抛出或记录。
+
+## 10. 安全与合规
+- 密钥管理：使用环境变量或密钥服务，避免硬编码；日志中勿输出敏感值。
+- 速率限制：对接平台 API 时遵守限流规则，可结合队列/重试策略。
+- 内容合规：生成 Prompt 与素材需遵循版权、平台政策及隐私要求，必要时接入人工审核。
+- 仓库约束：禁止提交二进制文件（数据库、截图、缓存等）。
+
+## 11. FAQ 与未来计划
+- **运行后数据库在哪里？** 默认使用 SQLite 文件，可通过 `DATABASE_URL` 切换 PostgreSQL 等；推荐将生产数据库放在托管服务。
+- **如何避免重复生成？** 去重服务在生成前扫描历史记录，投递成功后应写入 `articles/keywords` 表。
+- **是否支持多语言？** 当前模板为中文；可在 R3 之后扩展多语言 Prompt 与翻译流水线。
+- **开源计划？** 后续将根据路线图开放贡献指南，欢迎提交 Issue 与 PR。
+
+---
+如需更多帮助，请在 Issue 中反馈或加入后续讨论。

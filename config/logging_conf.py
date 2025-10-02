@@ -1,22 +1,28 @@
-"""结构化日志配置模块。"""
+"""结构化日志配置模块。
+
+该模块在导入时立刻配置 Python logging 与 structlog，确保所有子模块
+可以直接调用 ``structlog.get_logger()`` 获取 JSON 格式日志。
+"""
 
 from __future__ import annotations
 
-import logging
-from logging.config import dictConfig
+import logging  # 标准库 logging
+from logging.config import dictConfig  # 允许使用字典定义配置
 
-import structlog
+import structlog  # 第三方结构化日志库
 
 
 def setup_logging() -> None:
     """配置标准日志与 structlog 集成。"""
 
-    timestamper = structlog.processors.TimeStamper(fmt="iso")  # 定义时间戳处理器，使用 ISO 格式
+    timestamper = structlog.processors.TimeStamper(  # 创建时间戳处理器
+        fmt="iso"  # 使用 ISO8601 格式，便于日志聚合平台解析
+    )
 
     dictConfig(  # 使用 dictConfig 配置标准日志器
         {
-            "version": 1,
-            "disable_existing_loggers": False,
+            "version": 1,  # 表示配置版本，固定值
+            "disable_existing_loggers": False,  # 保留其他模块已有的 logger
             "formatters": {
                 "plain": {
                     "format": "%(message)s",  # 基础 formatter 输出纯文本信息
@@ -25,12 +31,12 @@ def setup_logging() -> None:
             "handlers": {
                 "default": {
                     "class": "logging.StreamHandler",  # 使用标准输出作为日志出口
-                    "formatter": "plain",
+                    "formatter": "plain",  # 指定上述 formatter
                 }
             },
             "root": {
-                "handlers": ["default"],
-                "level": "INFO",
+                "handlers": ["default"],  # 根 logger 绑定默认 handler
+                "level": "INFO",  # 设置日志级别，生产环境可改为 WARN/ERROR
             },
         }
     )
