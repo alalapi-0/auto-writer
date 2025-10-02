@@ -1,0 +1,207 @@
+[
+  {
+    "name": "Elliot Alderson",
+    "work": "Mr. Robot",
+    "traits": ["分离性人格", "社交焦虑", "孤独感", "道德冲突"]
+  },
+  {
+    "name": "Walter White",
+    "work": "Breaking Bad",
+    "traits": ["权力欲望", "道德滑坡", "自我合理化", "双重身份"]
+  },
+  {
+    "name": "Jesse Pinkman",
+    "work": "Breaking Bad",
+    "traits": ["依赖关系", "创伤后反应", "自卑", "反叛心理"]
+  },
+  {
+    "name": "Tony Soprano",
+    "work": "The Sopranos",
+    "traits": ["焦虑", "家庭矛盾", "暴力冲动", "精神分析冲突"]
+  },
+  {
+    "name": "Dexter Morgan",
+    "work": "Dexter",
+    "traits": ["反社会人格", "伪装正常", "强迫性", "双重身份"]
+  },
+  {
+    "name": "Rust Cohle",
+    "work": "True Detective",
+    "traits": ["虚无主义", "哲学化思维", "抑郁", "孤独感"]
+  },
+  {
+    "name": "Sherlock Holmes",
+    "work": "Sherlock (BBC)",
+    "traits": ["冷漠", "逻辑至上", "情感缺失", "成瘾问题"]
+  },
+  {
+    "name": "Prairie Johnson / Nina Azarova",
+    "work": "The OA",
+    "traits": ["身份矛盾", "解离体验", "创伤后反应", "近死体验叙事"]
+  },
+  {
+    "name": "Hannibal Lecter",
+    "work": "Hannibal (TV)",
+    "traits": ["精神病态", "智力优越", "操纵性", "冷酷"]
+  },
+  {
+    "name": "Cersei Lannister",
+    "work": "Game of Thrones",
+    "traits": ["控制欲", "偏执", "操纵", "冷酷"]
+  },
+  {
+    "name": "Jon Snow",
+    "work": "Game of Thrones",
+    "traits": ["责任焦虑", "道德挣扎", "孤立感"]
+  },
+  {
+    "name": "Petyr Baelish (Littlefinger)",
+    "work": "Game of Thrones",
+    "traits": ["权谋心态", "算计", "冷酷", "自我中心"]
+  },
+  {
+    "name": "Tommy Shelby",
+    "work": "Peaky Blinders",
+    "traits": ["冷酷", "创伤后压力", "领导欲望", "家庭责任"]
+  },
+  {
+    "name": "Tyler Durden",
+    "work": "Fight Club",
+    "traits": ["攻击性", "投射性认同", "反叛心理", "人格分裂"]
+  },
+  {
+    "name": "Narrator",
+    "work": "Fight Club",
+    "traits": ["失眠", "疏离感", "身份认同危机"]
+  },
+  {
+    "name": "Joker",
+    "work": "Joker (2019)",
+    "traits": ["边缘型人格", "社会疏离", "抑郁", "攻击性"]
+  },
+  {
+    "name": "Batman / Bruce Wayne",
+    "work": "The Dark Knight",
+    "traits": ["创伤", "控制欲", "孤独", "双重身份"]
+  },
+  {
+    "name": "Patrick Bateman",
+    "work": "American Psycho",
+    "traits": ["精神病态", "空虚", "自恋", "暴力冲动"]
+  },
+  {
+    "name": "Nina Sayers",
+    "work": "Black Swan",
+    "traits": ["完美主义", "身份撕裂", "焦虑", "幻觉"]
+  },
+  {
+    "name": "Travis Bickle",
+    "work": "Taxi Driver",
+    "traits": ["孤立", "愤怒", "偏执", "社会疏离"]
+  },
+  {
+    "name": "Jack Torrance",
+    "work": "The Shining",
+    "traits": ["精神崩溃", "暴力冲动", "孤立效应", "压力积累"]
+  },
+  {
+    "name": "Clarisse Starling",
+    "work": "The Silence of the Lambs",
+    "traits": ["坚毅", "创伤背景", "恐惧管理", "性别压力"]
+  },
+  {
+    "name": "Gollum / Sméagol",
+    "work": "The Lord of the Rings",
+    "traits": ["人格撕裂", "欲望驱动", "依附性", "偏执"]
+  },
+  {
+    "name": "Darth Vader",
+    "work": "Star Wars",
+    "traits": ["堕落", "内心矛盾", "权力欲望", "家庭冲突"]
+  },
+  {
+    "name": "Anakin Skywalker",
+    "work": "Star Wars",
+    "traits": ["恐惧", "愤怒", "执念", "依恋焦虑"]
+  },
+  {
+    "name": "Michael Corleone",
+    "work": "The Godfather",
+    "traits": ["权力", "家庭责任", "冷酷", "转变"]
+  },
+  {
+    "name": "Vito Corleone",
+    "work": "The Godfather",
+    "traits": ["权威", "控制", "父权", "忠诚观念"]
+  },
+  {
+    "name": "Light Yagami",
+    "work": "Death Note",
+    "traits": ["权力迷恋", "道德偏差", "智力优越感", "操控"]
+  },
+  {
+    "name": "L Lawliet",
+    "work": "Death Note",
+    "traits": ["强迫症", "高度理性", "社交怪异", "执着"]
+  },
+  {
+    "name": "Shinji Ikari",
+    "work": "Neon Genesis Evangelion",
+    "traits": ["逃避", "依附冲突", "自我怀疑", "抑郁"]
+  },
+  {
+    "name": "Asuka Langley",
+    "work": "Neon Genesis Evangelion",
+    "traits": ["自恋", "自卑", "攻击性", "矛盾人格"]
+  },
+  {
+    "name": "Rei Ayanami",
+    "work": "Neon Genesis Evangelion",
+    "traits": ["身份混乱", "情感缺失", "依附障碍"]
+  },
+  {
+    "name": "Griffith",
+    "work": "Berserk",
+    "traits": ["野心", "冷酷", "操纵", "牺牲他人"]
+  },
+  {
+    "name": "Guts",
+    "work": "Berserk",
+    "traits": ["创伤", "愤怒", "孤独", "依附矛盾"]
+  },
+  {
+    "name": "Homura Akemi",
+    "work": "Puella Magi Madoka Magica",
+    "traits": ["时间循环", "执念", "孤独", "保护欲"]
+  },
+  {
+    "name": "Madoka Kaname",
+    "work": "Puella Magi Madoka Magica",
+    "traits": ["牺牲", "理想主义", "纯真", "宿命感"]
+  },
+  {
+    "name": "BoJack Horseman",
+    "work": "BoJack Horseman",
+    "traits": ["虚无主义", "抑郁", "自毁倾向", "情感空洞"]
+  },
+  {
+    "name": "Raskolnikov",
+    "work": "Crime and Punishment",
+    "traits": ["罪恶感", "自恋", "道德冲突", "理智与情感撕裂"]
+  },
+  {
+    "name": "Dorian Gray",
+    "work": "The Picture of Dorian Gray",
+    "traits": ["自恋", "享乐主义", "道德沦丧", "身份矛盾"]
+  },
+  {
+    "name": "Victor Frankenstein",
+    "work": "Frankenstein",
+    "traits": ["痴迷", "孤独", "责任", "道德冲突"]
+  },
+  {
+    "name": "Dr. Jekyll / Mr. Hyde",
+    "work": "Strange Case of Dr Jekyll and Mr Hyde",
+    "traits": ["双重人格", "压抑", "道德二元性"]
+  }
+]
