@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AutoWriterJob",
+  "type": "object",
+  "required": [
+    "run_id",
+    "run_date",
+    "planned_articles",
+    "topics",
+    "template_options",
+    "delivery_targets"
+  ],
+  "properties": {
+    "run_id": {"type": "string"},
+    "run_date": {"type": "string"},
+    "planned_articles": {"type": "integer", "minimum": 1},
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["character_name", "work", "keyword"],
+        "properties": {
+          "character_name": {"type": "string"},
+          "work": {"type": "string"},
+          "keyword": {"type": "string"}
+        }
+      }
+    },
+    "template_options": {"type": "object"},
+    "delivery_targets": {
+      "type": "object",
+      "additionalProperties": {"type": ["boolean", "string", "number"]}
+    }
+  }
+}

@@ -12,7 +12,7 @@ from sqlalchemy import Select, func, select  # 导入 SQL 构造器
 from sqlalchemy.orm import Session
 
 from app.db.migrate import SessionLocal  # Session 工厂，生成数据库会话
-from app.db.models import Article, Keyword  # ORM 模型，用于查询历史记录
+from app.db.models import ArticleDraft, Keyword  # ORM 模型，用于查询历史记录
 
 
 class ArticleDeduplicator:
@@ -59,8 +59,8 @@ class ArticleDeduplicator:
 
         if not title:  # 空标题直接视为不重复，由调用方决定是否允许
             return False
-        title_stmt: Select[tuple[int]] = select(func.count(Article.id)).where(  # 构造计数查询
-            Article.title == title
+        title_stmt: Select[tuple[int]] = select(func.count(ArticleDraft.id)).where(  # 构造计数查询
+            ArticleDraft.title == title
         )
         count = session.execute(title_stmt).scalar_one()  # 执行查询并取计数
         return count > 0  # 大于零表示存在重复标题

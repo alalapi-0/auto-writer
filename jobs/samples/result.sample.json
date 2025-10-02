@@ -1,0 +1,17 @@
+{
+  "run_id": "2025-10-02-090000",
+  "success": true,
+  "articles": [
+    {
+      "character_name": "夏洛克",
+      "work": "神探夏洛克",
+      "keyword": "行为主义",
+      "status": "draft_pushed",
+      "platform_results": [
+        {"platform": "wordpress", "ok": true, "id_or_url": "wp-123"},
+        {"platform": "medium", "ok": false, "error": "rate_limit"}
+      ]
+    }
+  ],
+  "errors": []
+}

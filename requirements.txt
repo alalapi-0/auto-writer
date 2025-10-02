@@ -4,3 +4,4 @@ sqlalchemy==2.0.30  # ORM 层
 structlog==24.1.0  # 结构化日志
 requests==2.31.0  # HTTP 客户端
 playwright==1.44.0  # 浏览器自动化占位
+jsonschema==4.21.1  # JSON Schema 校验
