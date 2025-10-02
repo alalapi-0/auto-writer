@@ -8,16 +8,16 @@ packages = [{ include = "app" }, { include = "config" }]
 
 [tool.poetry.dependencies]
 python = "^3.11"
-apscheduler = "^3.10.4"
-python-dotenv = "^1.0.1"
-sqlalchemy = "^2.0.30"
-structlog = "^24.1.0"
-requests = "^2.31.0"
-playwright = "^1.44.0"
+apscheduler = "^3.10.4"  # 定时任务调度
+python-dotenv = "^1.0.1"  # 加载 .env 配置
+sqlalchemy = "^2.0.30"  # ORM 与数据库访问
+structlog = "^24.1.0"  # 结构化日志输出
+requests = "^2.31.0"  # HTTP 请求客户端
+playwright = "^1.44.0"  # 浏览器自动化占位
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.2.0"
-ruff = "^0.4.0"
+pytest = "^8.2.0"  # 单元测试框架
+ruff = "^0.4.0"  # 代码风格与静态检查
 
 [tool.ruff]
 line-length = 88

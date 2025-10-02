@@ -1,6 +1,6 @@
-apscheduler==3.10.4
-python-dotenv==1.0.1
-sqlalchemy==2.0.30
-structlog==24.1.0
-requests==2.31.0
-playwright==1.44.0
+apscheduler==3.10.4  # 定时任务调度
+python-dotenv==1.0.1  # 加载 .env 文件
+sqlalchemy==2.0.30  # ORM 层
+structlog==24.1.0  # 结构化日志
+requests==2.31.0  # HTTP 客户端
+playwright==1.44.0  # 浏览器自动化占位
