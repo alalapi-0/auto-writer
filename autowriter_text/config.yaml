@@ -1,0 +1,11 @@
+llm:
+  provider: "ollama"
+  model: "llama3.1:8b"
+  temperature: 0.4
+  max_tokens: 3000
+  timeout_s: 120
+  base_url: "http://127.0.0.1:11434"
+dedup:
+  scope: "daily"
+batch:
+  count: 5

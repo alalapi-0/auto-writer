@@ -80,7 +80,6 @@ poetry install
 
 ### `.env.example` 字段说明
 ```dotenv
-OPENAI_API_KEY=
 DB_URL=sqlite:///./local.db        # 仅示例；请勿提交实际 .db 文件
 LOG_LEVEL=INFO
 TIMEZONE=Asia/Tokyo
@@ -90,8 +89,19 @@ WORDPRESS_APP_PASSWORD=
 MEDIUM_INTEGRATION_TOKEN=
 WECHAT_APP_ID=
 WECHAT_APP_SECRET=
+GROQ_API_KEY=
+FIREWORKS_API_KEY=
+HF_API_TOKEN=
+VLLM_BASE_URL=
+OLLAMA_BASE_URL=
 ```
 > 提醒：不要提交真实密钥；生产环境建议接入密钥管理服务（如 AWS Secrets Manager、Vault）。
+
+### LLM 推理配置（Meta/Llama）
+- **本地优先（推荐）**：安装 [Ollama](https://ollama.com/download)，执行 `ollama pull llama3.1:8b` 拉取模型，在 `autowriter_text/config.yaml` 中保持 `provider=ollama` 即可使用本地推理。必要时可通过 `.env` 中的 `OLLAMA_BASE_URL` 覆盖服务地址。
+- **云端可选**：若选择 Groq、Fireworks 或 Hugging Face Inference Endpoints，请在 `.env` 中填入对应的 `GROQ_API_KEY`、`FIREWORKS_API_KEY`、`HF_API_TOKEN` 等凭据，并在配置文件中设置合适的 `llm.provider` 与 `llm.model`。自建 vLLM 服务可通过 `VLLM_BASE_URL` 指定地址。
+
+> 提示：Meta Llama 模型遵循非开源许可，仅允许在许可范围内进行推理。本项目仅调用已安装的权重，不包含任何模型文件，请在生产环境中确保合规使用。
 
 ### 首次运行完整步骤
 1. `git clone https://github.com/.../auto-writer.git`
