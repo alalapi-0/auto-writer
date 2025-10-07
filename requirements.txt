@@ -10,3 +10,5 @@ pyyaml==6.0.2  # YAML 配置解析
 pydantic==2.7.4  # 数据模型校验
 loguru==0.7.2  # 日志记录
 typing-extensions==4.11.0  # 新类型支持
+markdown-it-py==3.0.0  # Markdown 渲染为 HTML
+pyperclip==1.9.0  # 跨平台剪贴板复制
