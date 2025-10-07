@@ -136,7 +136,35 @@ make run
 - `platform_logs`（预留）可写入投递结果，用于判断是否需要重试。
 - 结合 `articles`/`keywords` 唯一约束，避免重复写入同一篇文章。
 
-## 6. 平台草稿投递（占位实现说明）
+## 6. 半自动导入（公众号/知乎）
+基于 V7.2 半自动导出方案，可在不调用平台 API 的情况下完成公众号与知乎草稿导入：
+
+### 公众号导入 SOP
+- 执行 `python cli.py export wechat --date YYYY-MM-DD`（默认为当天），在 `exports/wechat/YYYY-MM-DD/` 下生成 5 篇素材包。
+- 每篇目录包含 `title.txt`、`digest.txt`、`article.html`、`article.md`、`paste_wechat.txt`、`images/` 与 `README_IMPORT.md`。
+- 后台草稿操作：
+  1. 复制 `title.txt` 到标题输入框；
+  2. 复制 `digest.txt` 到摘要栏（系统会自动截断至 **≤120 汉字**）；
+  3. 打开 `article.html`，使用源码粘贴模式填入正文；
+  4. 按 `images/` 目录内文件顺序手动上传配图（若目录为空可跳过）；
+  5. 若需要一键粘贴，可使用 `paste_wechat.txt`（首行标题、次行摘要、剩余为 HTML 正文）。
+- 导出完成后会额外生成 `exports/wechat/YYYY-MM-DD/index.csv`、`index.json` 以及 `exports/wechat_{YYYY-MM-DD}.zip` 方便归档。
+
+### 知乎导入 SOP
+- 执行 `python cli.py export zhihu --date YYYY-MM-DD`（默认为当天），在 `exports/zhihu/YYYY-MM-DD/` 下获得 5 篇草稿素材。
+- 每篇目录包含 `title.txt`、`article.md`、`article.html`、`paste_zhihu.txt`、`images/` 与 `README_IMPORT.md`。
+- 写作页操作：
+  1. 复制 `title.txt` 到知乎标题；
+  2. 复制 `article.md`，选择“Markdown 粘贴”或使用 `Ctrl+Shift+V` 粘贴；
+  3. 按需参考 `README_IMPORT.md` 上传图片并核对元信息；
+  4. `paste_zhihu.txt` 可在紧急情况下一次粘贴标题 + 正文。
+- 导出完成后同样生成 `index.csv`、`index.json` 与 `exports/zhihu_{YYYY-MM-DD}.zip`。
+
+### 一键打包与剪贴板助手
+- 使用 `python cli.py export all --date YYYY-MM-DD` 可同时生成两个平台的目录，并在 `exports/bundle_all_{YYYY-MM-DD}.zip` 输出合并包交付助手。
+- 若需要逐段复制，可运行 `python cli.py copy wechat --date YYYY-MM-DD --index N` 或 `python cli.py copy zhihu --date YYYY-MM-DD --index N`，系统会依次将标题、摘要/正文放入剪贴板，每一步按回车继续。
+
+## 7. 平台草稿投递（占位实现说明）
 - **WordPress（REST）**：POST `https://<site>/wp-json/wp/v2/posts`，需 Basic Auth 或 Application Password，body 包含 `status: draft`、`title`、`content`、`categories`、`tags`。建议使用 HTTPS，处理 401/403/429 等状态码。
 - **Medium 草稿**：POST `https://api.medium.com/v1/users/{userId}/posts`，Header `Authorization: Bearer <token>`，body 包括 `title`、`contentFormat`、`content`、`tags`、`publishStatus: draft/unlisted`。若草稿 API 受限，可退化为未公开发布并记录返回 URL。
 - **微信公众号草稿**：
@@ -145,7 +173,7 @@ make run
   - 注意内容合规、审核延时与调用频率限制。
 - **Playwright 无头备选**：适用于无开放接口的平台。占位函数说明了启动浏览器、登录、填表、上传、提交的推荐步骤，同时强调不生成持久缓存。
 
-## 7. 数据库与去重策略
+## 8. 数据库与去重策略
 - 表结构：
   - `articles`：标题、正文、创建时间。
   - `keywords`：文章外键 + 关键词文本。
@@ -158,7 +186,7 @@ make run
   - 预留 `# TODO` 接口，引入 MinHash/SimHash、TF-IDF 或向量嵌入比对。
   - 在关键词库中记录权重、主题标签以提升精度。
 
-## 8. 日志、监控与排障
+## 9. 日志、监控与排障
 - 结构化日志字段建议：`run_id`、`platform`、`status`、`latency_ms`、`error`。
 - 常见错误：
   - **网络超时**：建议在请求层增加重试与退避。
@@ -166,7 +194,7 @@ make run
   - **限流/非 2xx**：记录响应 body，必要时触发报警。
 - 监控建议：接入 ELK / Loki / CloudWatch，并结合 metrics 统计成功率、耗时、重复率。
 
-## 9. 开发、测试与质量
+## 10. 开发、测试与质量
 - 常用命令：
   - `make lint`：运行 Ruff 检查与格式化。
   - `make test` 或 `pytest -q`：执行测试。
@@ -179,19 +207,19 @@ make run
   5. 编写测试模拟 API 响应，确保异常路径覆盖。
 - 代码规范：遵循 PEP8、使用类型标注、统一中文注释说明，异常需明确抛出或记录。
 
-## 10. 安全与合规
+## 11. 安全与合规
 - 密钥管理：使用环境变量或密钥服务，避免硬编码；日志中勿输出敏感值。
 - 速率限制：对接平台 API 时遵守限流规则，可结合队列/重试策略。
 - 内容合规：生成 Prompt 与素材需遵循版权、平台政策及隐私要求，必要时接入人工审核。
 - 仓库约束：禁止提交二进制文件（数据库、截图、缓存等）。
 
-## 11. FAQ 与未来计划
+## 12. FAQ 与未来计划
 - **运行后数据库在哪里？** 默认使用 SQLite 文件，可通过 `DATABASE_URL` 切换 PostgreSQL 等；推荐将生产数据库放在托管服务。
 - **如何避免重复生成？** 去重服务在生成前扫描历史记录，投递成功后应写入 `articles/keywords` 表。
 - **是否支持多语言？** 当前模板为中文；可在 R3 之后扩展多语言 Prompt 与翻译流水线。
 - **开源计划？** 后续将根据路线图开放贡献指南，欢迎提交 Issue 与 PR。
 
-## 12. 文章生成规范（R3）
+## 13. 文章生成规范（R3）
 - **生成目标**：文章需融合影评风格与学术分析，约 2000 字，整体语调冷静理性。
 - **禁止事项**：严格禁止使用第一人称、呼吁性措辞以及引用影视作品台词，确保文本客观中立。
 - **选题范围**：每次生成从数据库 `psychology_themes` 表抽取未使用的「心理学关键词 × 影视角色」组合，覆盖动画、电影与各类剧集中的心理、悬疑、存在主义等主题。
