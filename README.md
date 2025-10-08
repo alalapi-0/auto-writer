@@ -172,11 +172,16 @@ make run
    - `python cli.py auto all    --date YYYY-MM-DD [--limit 5]`
    CLI 会按顺序读取当日导出包的前 N 篇文章，通过 Playwright 连接到已登录的浏览器并自动创建草稿。
 3. 关注输出：每篇文章都会打印成功/失败状态；异常时会在 `automation_logs/YYYY-MM-DD/` 生成截图，便于排查。
+4. 若检测到登录或验证码拦截，命令行会提示“请在该浏览器完成登录后按 Enter 继续”，请切换到对应标签页完成后再回车。
+5. 每次运行会在 `automation_logs/<DATE>/summary.json` 写入结构化结果，记录成功/跳过/失败原因与截图路径。
 
 ### 常见问题
 - **页面元素找不到或保存失败**：平台 UI 改版时请参考 `automation_logs/` 内的截图，更新 `automation/` 下的选择器或流程。
 - **登录过期/出现验证码**：脚本会提示人工处理，请在对应浏览器标签页完成验证后重新执行命令。
-- **操作节奏过快**：建议在命令之间留出间隔，保持与人工操作一致，避免触发异常风控。
+- **操作节奏过快**：可通过 `--min-interval` 与 `--max-interval` 参数控制跨篇等待区间（默认 6-12 秒），`--max-retries` 指定单篇重试次数。
+- **公众号 HTML 支持范围**：正文粘贴前会执行白名单清洗，保留 `p/br/strong/em/h1-h4/blockquote/ul/ol/li/img/a/code/pre/span` 标签；`img` 仅接受 http/https 链接，若存在相对路径会插入 “TODO 请上传图片” 提示。
+- **重复保护**：自动以 RapidFuzz 对比近 14 天标题，相似度 ≥ 85 将标记为 `similar to <历史标题>` 并跳过；阈值与窗口可在 `pipeline/postprocess.py` 调整。
+- **DRY-RUN**：传入 `--dry-run` 可只验证选择器与粘贴流程，不执行保存，终端会显示 `DRY RUN ✓`。
 
 > 说明：该功能仅用于本机辅助提效，不会采集或存储账号口令。请在遵守平台服务条款与使用规范的前提下使用，避免高频、批量或异常自动化行为。
 

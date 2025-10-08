@@ -12,3 +12,5 @@ loguru==0.7.2  # 日志记录
 typing-extensions==4.11.0  # 新类型支持
 markdown-it-py==3.0.0  # Markdown 渲染为 HTML
 pyperclip==1.9.0  # 跨平台剪贴板复制
+beautifulsoup4==4.12.3  # HTML 清洗
+rapidfuzz==3.6.1  # 文本相似度计算

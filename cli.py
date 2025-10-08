@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Tuple
 
-from autowriter_text.pipeline.postprocess import ArticleRow, collect_articles_for_date
+from autowriter_text.pipeline.postprocess import (
+    ArticleRow,
+    collect_articles_for_date,
+    is_similar_recent,
+)
 
 from automation import WeChatAutomator, ZhihuAutomator, connect_chrome_cdp
+from automation.utils import human_sleep
 
 from exporter.common import ensure_dir, export_index_csv_json
 from exporter.packer import bundle_all, zip_dir
@@ -143,9 +149,15 @@ def cmd_copy(args: argparse.Namespace) -> None:
 def cmd_auto(args: argparse.Namespace) -> None:
     """处理 auto 子命令，使用本机浏览器自动创建草稿。"""
 
-    date_str = _parse_date(args.date)
-    limit = getattr(args, "limit", 5) or 5
-    articles = _select_articles(date_str, limit)
+    date_str = _parse_date(args.date)  # 解析目标日期。
+    limit = getattr(args, "limit", 5) or 5  # 控制单次送稿的篇数。
+    articles = _select_articles(date_str, limit)  # 读取当日素材。
+    dry_run = bool(getattr(args, "dry_run", False))  # 是否仅演练不保存。
+    max_retries = max(1, int(getattr(args, "max_retries", 3)))  # 单篇最大重试次数。
+    min_interval = float(getattr(args, "min_interval", 6.0))  # 跨篇节流下限。
+    max_interval = float(getattr(args, "max_interval", 12.0))  # 跨篇节流上限。
+    if max_interval < min_interval:
+        max_interval = min_interval  # 保证区间有效。
     try:
         context = connect_chrome_cdp(getattr(args, "cdp", "http://127.0.0.1:9222"))
     except RuntimeError as exc:
@@ -162,32 +174,82 @@ def cmd_auto(args: argparse.Namespace) -> None:
     else:
         platforms = ("wechat", "zhihu")
 
+    wechat = WeChatAutomator(context) if "wechat" in platforms else None  # 初始化公众号自动化实例。
+    zhihu = ZhihuAutomator(context) if "zhihu" in platforms else None  # 初始化知乎自动化实例。
+    results: list[dict[str, object]] = []  # 累积所有平台的执行结果。
+
     try:
-        if "wechat" in platforms:
-            wechat = WeChatAutomator(context)
-            for idx, article in enumerate(articles, start=1):
-                try:
+        for idx, article in enumerate(articles, start=1):
+            similar, match_title = is_similar_recent(article.title)  # 去重检测。
+            if similar:
+                reason = f"similar to <{match_title}>"
+                for platform in platforms:
+                    entry = {
+                        "ok": False,
+                        "platform": platform,
+                        "title": article.title,
+                        "reason": reason,
+                        "screenshot": "",
+                        "skipped": True,
+                    }
+                    results.append(entry)
+                    print(f"[{platform}] {article.title} ... SKIP ({reason})")
+                continue
+
+            for platform in platforms:
+                if platform == "wechat" and wechat is not None:
                     result = wechat.create_draft(
                         article,
                         screenshot_prefix=f"wechat_{date_str}_{idx:02d}",
+                        dry_run=dry_run,
+                        max_retries=max_retries,
                     )
-                    print(f"[wechat] {idx:02d}《{article.title}》 -> {result}")
-                except Exception as exc:  # pragma: no cover - 浏览器行为受环境影响
-                    print(f"[wechat] {idx:02d}《{article.title}》 失败：{exc}")
-        if "zhihu" in platforms:
-            zhihu = ZhihuAutomator(context)
-            for idx, article in enumerate(articles, start=1):
-                try:
-                    result = zhihu.create_draft(article)
-                    print(f"[zhihu] {idx:02d}《{article.title}》 -> {result}")
-                except Exception as exc:  # pragma: no cover - 浏览器行为受环境影响
-                    print(f"[zhihu] {idx:02d}《{article.title}》 失败：{exc}")
+                elif platform == "zhihu" and zhihu is not None:
+                    result = zhihu.create_draft(
+                        article,
+                        dry_run=dry_run,
+                        max_retries=max_retries,
+                    )
+                else:  # pragma: no cover - 理论上不会触发
+                    continue
+                result.setdefault("skipped", False)  # 统一附带 skipped 字段，便于统计。
+                results.append(result)
+                status = "OK" if result.get("ok") else ("SKIP" if result.get("skipped") else "FAIL")
+                reason = result.get("reason", "")
+                screenshot = result.get("screenshot") or ""
+                shot_text = f" [shot: {screenshot}]" if screenshot else ""
+                print(f"[{platform}] {article.title} ... {status} ({reason}){shot_text}")  # 逐篇打印结果。
+            if idx < len(articles):
+                human_sleep(min_interval, max_interval)  # 跨篇随机等待，模拟人工节奏。
     finally:
         if playwright is not None:
             try:
                 playwright.stop()
             except Exception:  # pragma: no cover - Playwright 清理失败时忽略
                 pass
+
+    success_count = sum(1 for item in results if item.get("ok"))  # 成功篇目数。
+    skipped_count = sum(1 for item in results if item.get("skipped"))  # 去重或手动跳过数。
+    failed_count = len(results) - success_count - skipped_count  # 其余视为失败。
+    print(f"完成：成功 {success_count} / 跳过 {skipped_count} / 失败 {failed_count}")
+
+    log_dir = Path("automation_logs") / date_str  # 每日汇总目录。
+    log_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = log_dir / "summary.json"
+    payload = {
+        "date": date_str,
+        "dry_run": dry_run,
+        "max_retries": max_retries,
+        "interval": {"min": min_interval, "max": max_interval},
+        "results": results,
+        "counters": {
+            "success": success_count,
+            "skipped": skipped_count,
+            "failed": failed_count,
+        },
+    }
+    summary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"运行详情已保存至 {summary_path}")  # 输出汇总文件路径。
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -233,12 +295,20 @@ def build_parser() -> argparse.ArgumentParser:
     auto_wechat.add_argument("--date", help="目标日期，默认当天")
     auto_wechat.add_argument("--limit", type=int, default=5, help="送入草稿的篇数")
     auto_wechat.add_argument("--cdp", default="http://127.0.0.1:9222", help="Chrome CDP 地址")
+    auto_wechat.add_argument("--dry-run", action="store_true", help="仅演练到定位编辑器，不提交保存")
+    auto_wechat.add_argument("--max-retries", type=int, default=3, help="同一篇草稿失败后的最大重试次数")
+    auto_wechat.add_argument("--min-interval", type=float, default=6.0, help="跨篇等待的最小秒数")
+    auto_wechat.add_argument("--max-interval", type=float, default=12.0, help="跨篇等待的最大秒数")
     auto_wechat.set_defaults(func=cmd_auto)
 
     auto_zhihu = auto_sub.add_parser("zhihu", help="送知乎草稿")
     auto_zhihu.add_argument("--date", help="目标日期，默认当天")
     auto_zhihu.add_argument("--limit", type=int, default=5, help="送入草稿的篇数")
     auto_zhihu.add_argument("--cdp", default="http://127.0.0.1:9222", help="Chrome CDP 地址")
+    auto_zhihu.add_argument("--dry-run", action="store_true", help="仅演练到定位编辑器，不提交保存")
+    auto_zhihu.add_argument("--max-retries", type=int, default=3, help="同一篇草稿失败后的最大重试次数")
+    auto_zhihu.add_argument("--min-interval", type=float, default=6.0, help="跨篇等待的最小秒数")
+    auto_zhihu.add_argument("--max-interval", type=float, default=12.0, help="跨篇等待的最大秒数")
     auto_zhihu.set_defaults(func=cmd_auto)
 
     auto_all = auto_sub.add_parser("all", help="两个平台同时送草稿")
@@ -247,6 +317,10 @@ def build_parser() -> argparse.ArgumentParser:
     auto_all.add_argument(
         "--cdp", default="http://127.0.0.1:9222", help="Chrome CDP 地址（两个平台共用）"
     )
+    auto_all.add_argument("--dry-run", action="store_true", help="仅演练到定位编辑器，不提交保存")
+    auto_all.add_argument("--max-retries", type=int, default=3, help="同一篇草稿失败后的最大重试次数")
+    auto_all.add_argument("--min-interval", type=float, default=6.0, help="跨篇等待的最小秒数")
+    auto_all.add_argument("--max-interval", type=float, default=12.0, help="跨篇等待的最大秒数")
     auto_all.set_defaults(func=cmd_auto)
 
     return parser

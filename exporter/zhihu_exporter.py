@@ -9,7 +9,7 @@ from typing import List
 
 from autowriter_text.pipeline.postprocess import ArticleRow
 
-from .common import ensure_dir, md_to_html, write_json, write_text
+from .common import ensure_dir, md_to_html, normalize_title, write_json, write_text
 
 ZHIHU_README = """# 知乎导入步骤\n\n1. 打开知乎写作页面，选择文章创作。\n2. 新建草稿后，将 `title.txt` 内容粘贴到标题。\n3. 打开 `article.md`，复制全文（推荐使用 Markdown 编辑器保持格式）。\n4. 在知乎编辑器中选择“Markdown 粘贴”或使用 `Ctrl+Shift+V` 粘贴纯文本，再逐段校对。\n5. 如需插图，请按 `images/` 文件名顺序手动上传。\n6. 校验 `meta.json` 中的角色、关键词与生成时间后发布或保存草稿。\n"""
 
@@ -30,14 +30,15 @@ def export_for_zhihu(articles: List[ArticleRow], out_dir: str | Path) -> List[di
     for idx, article in enumerate(articles, start=1):
         slug = _slugify(article.title)
         article_dir = ensure_dir(export_path / f"{idx:02d}_{slug}")
-        write_text(article_dir / "title.txt", article.title)
+        title_text = normalize_title(article.title)
+        write_text(article_dir / "title.txt", title_text)
         write_text(article_dir / "article.md", article.content_md)
         html_body = (article.content_html or "").strip()
         if not html_body:
             html_body = md_to_html(article.content_md)
         write_text(article_dir / "article.html", html_body)
         # 合并粘贴文件：首行标题，其余为 Markdown 正文，方便单次复制。
-        paste_body = "\n".join([article.title, article.content_md])
+        paste_body = "\n".join([title_text, article.content_md])
         write_text(article_dir / "paste_zhihu.txt", paste_body)
         write_text(article_dir / "README_IMPORT.md", ZHIHU_README)
         ensure_dir(article_dir / "images")
@@ -50,7 +51,7 @@ def export_for_zhihu(articles: List[ArticleRow], out_dir: str | Path) -> List[di
             {
                 "platform": "zhihu",
                 "article_id": article.id,
-                "title": article.title,
+                "title": title_text,
                 "role": article.role_name,
                 "keyword": article.keyword_term,
                 "created_at": article.created_at,
