@@ -32,7 +32,9 @@ def export_for_zhihu(articles: List[ArticleRow], out_dir: str | Path) -> List[di
         article_dir = ensure_dir(export_path / f"{idx:02d}_{slug}")
         write_text(article_dir / "title.txt", article.title)
         write_text(article_dir / "article.md", article.content_md)
-        html_body = md_to_html(article.content_md)
+        html_body = (article.content_html or "").strip()
+        if not html_body:
+            html_body = md_to_html(article.content_md)
         write_text(article_dir / "article.html", html_body)
         # 合并粘贴文件：首行标题，其余为 Markdown 正文，方便单次复制。
         paste_body = "\n".join([article.title, article.content_md])

@@ -41,7 +41,9 @@ def export_for_wechat(
         write_text(article_dir / "digest.txt", digest)
         # 保存 Markdown 与 HTML，分别满足编辑器差异化需求。
         write_text(article_dir / "article.md", article.content_md)
-        html_body = md_to_html(article.content_md)
+        html_body = (article.content_html or "").strip()
+        if not html_body:
+            html_body = md_to_html(article.content_md)
         write_text(article_dir / "article.html", html_body)
         # 合并粘贴文件：按需求排列标题、摘要与 HTML 正文。
         paste_body = "\n".join([article.title, digest, html_body])
