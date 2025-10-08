@@ -44,24 +44,44 @@ def md_to_html(md_text: str) -> str:
     return "<p>" + escaped.replace("\n\n", "</p><p>").replace("\n", "<br />") + "</p>"
 
 
+def normalize_title(title: str) -> str:
+    """对标题做基本清洗，避免前后空白与重复标点。"""
+
+    cleaned = title.strip()  # 去除首尾空白字符。
+    cleaned = re.sub(r"[\s\u3000]+", " ", cleaned)  # 将多余空白压缩成单个空格。
+    cleaned = re.sub(r"([，。！？,.!?；;])\1+", r"\1", cleaned)  # 重复标点合并为一个。
+    cleaned = cleaned.rstrip("，。！？,.!?；;:：")  # 移除末尾多余标点。
+    return cleaned
+
+
+def short_digest(text: str, max_cn: int = 120) -> str:
+    """截断正文用于摘要，避免切断中文标点。"""
+
+    corpus = text.replace("\r", "").replace("\n", "")  # 去除换行符。
+    corpus = re.sub(r"\s+", "", corpus)  # 删除内部空白，保留连续文字。
+    if len(corpus) <= max_cn:
+        return corpus  # 长度不超过限制直接返回。
+    snippet = corpus[:max_cn]  # 先切片到指定长度。
+    while snippet and snippet[-1] in "，。；！？、：":
+        snippet = snippet[:-1]  # 如果结尾是中文标点则继续回退。
+    return snippet or corpus[:max_cn]  # 全部回退后仍为空则返回原切片。
+
+
 def make_digest(text: str, max_len_cn: int = 120) -> str:
     """截取正文前 max_len_cn 个字符作为公众号摘要。"""
 
-    # 先按行拆分并去除可能出现的口号或无效提示。
     lines = []
     for raw_line in text.replace("\r", "").split("\n"):
-        line = raw_line.strip()
+        line = raw_line.strip()  # 移除行首尾空白。
         if not line:
             continue  # 跳过空行。
         if line.startswith("【角色】"):
-            continue  # 摘要无需包含角色提示语。
-        # 过滤常见的呼吁性词语，避免摘要出现“欢迎关注”等口号。
+            continue  # 角色说明不进入摘要。
         if re.match(r"^(欢迎|扫码|关注|喜欢|记得)", line):
-            continue
+            continue  # 常见口号类文案直接丢弃。
         lines.append(line)
-    # 将处理后的行连接成一段文本；中文长度近似使用 len() 计算即可。
-    merged = "".join(lines)
-    return merged[:max_len_cn]
+    merged = "".join(lines)  # 拼接为连续文本供后续截断。
+    return merged[: max_len_cn * 2]  # 预裁剪到两倍长度，最终由 short_digest 控制。
 
 
 def write_text(path: str | Path, content: str) -> None:
@@ -107,6 +127,8 @@ __all__ = [
     "export_index_csv_json",
     "make_digest",
     "md_to_html",
+    "normalize_title",
+    "short_digest",
     "write_json",
     "write_text",
 ]

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List
 
 from autowriter_text.db import ensure_schema, get_connection
 from autowriter_text.logging import logger
+
+from rapidfuzz import fuzz
 
 
 try:  # 优先使用 markdown-it 渲染 HTML。
@@ -136,4 +138,52 @@ def collect_articles_for_date(date_str: str) -> List[ArticleRow]:
     return rows
 
 
-__all__ = ["ArticleRow", "collect_articles_for_date"]
+def _parse_datetime(value: str) -> datetime | None:
+    """尝试将数据库中的时间字符串转换为 datetime 对象。"""
+
+    if not value:
+        return None  # 空字符串直接返回。
+    try:
+        return datetime.fromisoformat(value)  # 优先尝试 ISO8601 格式。
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt)  # 兼容常见的日期/时间字符串。
+        except ValueError:
+            continue
+    return None  # 无法解析则返回空。
+
+
+def is_similar_recent(title: str, days: int = 14, threshold: int = 85) -> tuple[bool, str]:
+    """判断标题在近 N 天内是否与历史记录高度相似。"""
+
+    if not title.strip():
+        return False, ""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))  # 计算时间窗口。
+    with get_connection() as conn:
+        ensure_schema(conn)
+        cursor = conn.execute(
+            "SELECT title, COALESCE(created_at, '') AS created_at FROM articles"
+        )
+        rows = cursor.fetchall()
+    best_match = ""
+    best_score = 0
+    for row in rows:
+        candidate = row["title"] or ""  # 候选标题。
+        created = _parse_datetime(row["created_at"])  # 尝试解析创建时间。
+        if created is None:
+            continue  # 没有时间戳则忽略。
+        created_dt = created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created.astimezone(timezone.utc)
+        if created_dt < cutoff:
+            continue  # 超出时间窗口的记录不参与比较。
+        score = fuzz.ratio(title, candidate)  # 计算相似度得分。
+        if score > best_score:
+            best_score = score
+            best_match = candidate
+    if best_score >= threshold:
+        return True, best_match
+    return False, ""
+
+
+__all__ = ["ArticleRow", "collect_articles_for_date", "is_similar_recent"]
