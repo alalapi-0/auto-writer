@@ -1,4 +1,4 @@
-"""导出目录的打包工具。"""
+"""导出目录打包工具，负责统一换行与压缩。"""
 
 from __future__ import annotations
 
@@ -6,6 +6,31 @@ import zipfile
 from pathlib import Path
 
 from .common import ensure_dir
+
+# 需要统一换行符的文本扩展名，用于判断是否按 UTF-8 正常化。
+_TEXT_EXTS = {
+    ".txt",
+    ".md",
+    ".html",
+    ".json",
+    ".csv",
+    ".yml",
+    ".yaml",
+}
+
+
+def _normalize_newlines(path: Path, data: bytes) -> bytes:
+    """确保文本文件在压缩时使用 ``\n`` 作为换行符。"""
+
+    if path.suffix.lower() not in _TEXT_EXTS:
+        return data  # 非文本文件直接返回原始字节。
+    try:
+        # 解码为字符串后统一替换 CRLF/CR，避免平台间换行差异。
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data  # pragma: no cover - 遇到非 UTF-8 内容时保持原样。
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return normalized.encode("utf-8")
 
 
 def zip_dir(src_dir: str | Path, zip_path: str | Path) -> Path:
@@ -22,7 +47,7 @@ def zip_dir(src_dir: str | Path, zip_path: str | Path) -> Path:
                     zf.write(item, arcname=str(arcname) + "/")
                 continue
             data = item.read_bytes()
-            zf.writestr(str(arcname), data)
+            zf.writestr(str(arcname), _normalize_newlines(item, data))
     return zip_file_path
 
 
@@ -44,7 +69,7 @@ def bundle_all(date_dir_wechat: str | Path, date_dir_zhihu: str | Path, out_zip:
                         zf.write(item, arcname=str(arcname) + "/")
                     continue
                 data = item.read_bytes()
-                zf.writestr(str(arcname), data)
+                zf.writestr(str(arcname), _normalize_newlines(item, data))
     return out_path
 
 
