@@ -97,6 +97,14 @@ OLLAMA_BASE_URL=
 ```
 > 提醒：不要提交真实密钥；生产环境建议接入密钥管理服务（如 AWS Secrets Manager、Vault）。
 
+### 快速上手任务清单（TL;DR）
+1. **复制环境变量模版**：`cp .env.example .env` 并按照下表填写必填项。
+2. **准备依赖与数据库**：创建虚拟环境 → 安装依赖 → `make init` 生成基础表结构。
+3. **验证生成链路**：执行 `python app/main.py --topic "示例主题"` 查看命令行输出。
+4. **批量导出草稿**（可选）：按需运行 `python cli.py export wechat --date YYYY-MM-DD` 等命令产出素材包。
+5. **自动化送稿**（可选）：提前登录浏览器后执行 `python cli.py auto wechat --date YYYY-MM-DD`。
+6. **生产化调度**：配置 cron 或运行 `python -m app.scheduler`，并在 `.env` 中设置 `SCHEDULE_CRON` 与每日产量。
+
 ### LLM 推理配置（Meta/Llama）
 - **本地优先（推荐）**：安装 [Ollama](https://ollama.com/download)，执行 `ollama pull llama3.1:8b` 拉取模型，在 `autowriter_text/config.yaml` 中保持 `provider=ollama` 即可使用本地推理。必要时可通过 `.env` 中的 `OLLAMA_BASE_URL` 覆盖服务地址。
 - **云端可选**：若选择 Groq、Fireworks 或 Hugging Face Inference Endpoints，请在 `.env` 中填入对应的 `GROQ_API_KEY`、`FIREWORKS_API_KEY`、`HF_API_TOKEN` 等凭据，并在配置文件中设置合适的 `llm.provider` 与 `llm.model`。自建 vLLM 服务可通过 `VLLM_BASE_URL` 指定地址。
@@ -112,6 +120,32 @@ OLLAMA_BASE_URL=
 6. 执行 `make init` 以初始化数据库结构。
 7. 运行一次：`python app/main.py --topic "示例主题"` 或 `make run`。
 8. 查看日志：命令行输出为 JSON，包含 run_id、platform、status 等字段。
+
+### 环境变量填写与调整对照表
+| 分类 | 变量 | 是否必填 | 作用 | 需要执行的操作 |
+| --- | --- | --- | --- | --- |
+| 核心运行 | `DB_URL` / `DATABASE_URL` | 可选 | 设置数据库连接，默认使用本地 SQLite | 使用云端数据库时修改；本地演示可保持默认 |
+| 核心运行 | `LOG_LEVEL` | 可选 | 控制日志级别 | 根据排障需求调高/调低 |
+| 核心运行 | `TIMEZONE` | 建议填写 | 控制调度与日志所使用的时区 | 根据团队所在地区修改 |
+| 调度策略 | `DAILY_ARTICLE_COUNT` | 建议填写 | 每日目标产稿数（默认 3） | 根据生产计划调整 |
+| 调度策略 | `KEYWORD_RECENT_COOLDOWN_DAYS` | 可选 | 关键词冷却窗口 | 若需更快复用关键词则调小 |
+| 调度策略 | `POSTRUN_ENRICH_GROUP_SIZE` | 可选 | 事后补充分组阈值 | 保持默认或按批量需求调整 |
+| 调度策略 | `ENABLE_POSTRUN_ENRICH` | 可选 | 是否开启补充逻辑 | 不需要补充时改为 `false` |
+| Cron 调度 | `SCHEDULE_CRON` | 必填（生产） | APScheduler/cron 的表达式 | 在自动化部署时填写 |
+| VPS Worker | VPS_*（SSH_HOST/SSH_USER/SSH_PORT/SSH_KEY_PATH/WORKDIR） | 可选 | 定义远程 worker 登录信息 | 启用 VPS 模式时填写 |
+| 平台凭据 | WordPress_*（BASE_URL/USERNAME/APP_PASSWORD） | 可选 | WordPress 凭据 | 启用 WordPress 投递时填写 |
+| 平台凭据 | `MEDIUM_INTEGRATION_TOKEN` | 可选 | Medium API Token | 投递 Medium 时填写 |
+| 平台凭据 | WeChat_*（APP_ID/APP_SECRET） | 可选 | 微信公众号草稿接口凭据 | 启用公众号 API 时填写 |
+| LLM/推理 | `OLLAMA_BASE_URL` / `LLM_BASE_URL` | 可选 | 本地或统一大模型服务地址 | 变更默认端口或远程推理时修改 |
+| LLM/推理 | `GROQ_API_KEY`、`FIREWORKS_API_KEY`、`HF_API_TOKEN`、`VLLM_BASE_URL` | 可选 | 各云端推理凭据 | 选择对应云厂商时填写 |
+| 历史兼容 | `OPENAI_API_KEY` | 可选 | 兼容旧逻辑的占位字段 | 如需切换到 OpenAI 模型再填写 |
+
+> 建议将 `.env` 仅保存在本地开发环境或密钥管理系统中，生产环境通过 CI/CD 动态注入，避免凭据泄露。
+
+### 需要调整的本地配置文件
+- `autowriter_text/config.yaml`：控制生成模型 (`llm.provider`、`llm.model`、`llm.base_url`)、批量大小 (`batch.count`) 与去重范围 (`dedup.scope`)，如需切换到云端推理或增减每日草稿，可在此修改后重启任务。
+- `app/generator/prompts/article_prompt_template.txt`：定义文章写作模板与语气，若要适配新风格或不同语言，请在保证结构完整的情况下修改该文件。
+- `jobs/job.schema.json`（仅 orchestrator + VPS 模式使用）：若需扩展下发字段（如新增渠道参数），请遵循 JSON Schema 更新并同步 orchestrator/worker。
 
 ## 5. 运行与调度
 ### 本地一次性运行
