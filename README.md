@@ -164,7 +164,23 @@ make run
 - 使用 `python cli.py export all --date YYYY-MM-DD` 可同时生成两个平台的目录，并在 `exports/bundle_all_{YYYY-MM-DD}.zip` 输出合并包交付助手。
 - 若需要逐段复制，可运行 `python cli.py copy wechat --date YYYY-MM-DD --index N` 或 `python cli.py copy zhihu --date YYYY-MM-DD --index N`，系统会依次将标题、摘要/正文放入剪贴板，每一步按回车继续。
 
-## 7. 平台草稿投递（占位实现说明）
+## 7. 自动送草稿（本机浏览器自动化，无需 API）
+1. 启动本机 Chrome：退出所有实例后以 `chrome --remote-debugging-port=9222` 或等效方式重新打开，并在该窗口中提前登录「公众号后台」与「知乎写作页」。
+2. 运行命令：
+   - `python cli.py auto wechat --date YYYY-MM-DD [--limit 5] [--cdp http://127.0.0.1:9222]`
+   - `python cli.py auto zhihu  --date YYYY-MM-DD [--limit 5] [--cdp http://127.0.0.1:9222]`
+   - `python cli.py auto all    --date YYYY-MM-DD [--limit 5]`
+   CLI 会按顺序读取当日导出包的前 N 篇文章，通过 Playwright 连接到已登录的浏览器并自动创建草稿。
+3. 关注输出：每篇文章都会打印成功/失败状态；异常时会在 `automation_logs/YYYY-MM-DD/` 生成截图，便于排查。
+
+### 常见问题
+- **页面元素找不到或保存失败**：平台 UI 改版时请参考 `automation_logs/` 内的截图，更新 `automation/` 下的选择器或流程。
+- **登录过期/出现验证码**：脚本会提示人工处理，请在对应浏览器标签页完成验证后重新执行命令。
+- **操作节奏过快**：建议在命令之间留出间隔，保持与人工操作一致，避免触发异常风控。
+
+> 说明：该功能仅用于本机辅助提效，不会采集或存储账号口令。请在遵守平台服务条款与使用规范的前提下使用，避免高频、批量或异常自动化行为。
+
+## 8. 平台草稿投递（占位实现说明）
 - **WordPress（REST）**：POST `https://<site>/wp-json/wp/v2/posts`，需 Basic Auth 或 Application Password，body 包含 `status: draft`、`title`、`content`、`categories`、`tags`。建议使用 HTTPS，处理 401/403/429 等状态码。
 - **Medium 草稿**：POST `https://api.medium.com/v1/users/{userId}/posts`，Header `Authorization: Bearer <token>`，body 包括 `title`、`contentFormat`、`content`、`tags`、`publishStatus: draft/unlisted`。若草稿 API 受限，可退化为未公开发布并记录返回 URL。
 - **微信公众号草稿**：
@@ -173,7 +189,7 @@ make run
   - 注意内容合规、审核延时与调用频率限制。
 - **Playwright 无头备选**：适用于无开放接口的平台。占位函数说明了启动浏览器、登录、填表、上传、提交的推荐步骤，同时强调不生成持久缓存。
 
-## 8. 数据库与去重策略
+## 9. 数据库与去重策略
 - 表结构：
   - `articles`：标题、正文、创建时间。
   - `keywords`：文章外键 + 关键词文本。
@@ -186,7 +202,7 @@ make run
   - 预留 `# TODO` 接口，引入 MinHash/SimHash、TF-IDF 或向量嵌入比对。
   - 在关键词库中记录权重、主题标签以提升精度。
 
-## 9. 日志、监控与排障
+## 10. 日志、监控与排障
 - 结构化日志字段建议：`run_id`、`platform`、`status`、`latency_ms`、`error`。
 - 常见错误：
   - **网络超时**：建议在请求层增加重试与退避。
@@ -194,7 +210,7 @@ make run
   - **限流/非 2xx**：记录响应 body，必要时触发报警。
 - 监控建议：接入 ELK / Loki / CloudWatch，并结合 metrics 统计成功率、耗时、重复率。
 
-## 10. 开发、测试与质量
+## 11. 开发、测试与质量
 - 常用命令：
   - `make lint`：运行 Ruff 检查与格式化。
   - `make test` 或 `pytest -q`：执行测试。
@@ -207,19 +223,19 @@ make run
   5. 编写测试模拟 API 响应，确保异常路径覆盖。
 - 代码规范：遵循 PEP8、使用类型标注、统一中文注释说明，异常需明确抛出或记录。
 
-## 11. 安全与合规
+## 12. 安全与合规
 - 密钥管理：使用环境变量或密钥服务，避免硬编码；日志中勿输出敏感值。
 - 速率限制：对接平台 API 时遵守限流规则，可结合队列/重试策略。
 - 内容合规：生成 Prompt 与素材需遵循版权、平台政策及隐私要求，必要时接入人工审核。
 - 仓库约束：禁止提交二进制文件（数据库、截图、缓存等）。
 
-## 12. FAQ 与未来计划
+## 13. FAQ 与未来计划
 - **运行后数据库在哪里？** 默认使用 SQLite 文件，可通过 `DATABASE_URL` 切换 PostgreSQL 等；推荐将生产数据库放在托管服务。
 - **如何避免重复生成？** 去重服务在生成前扫描历史记录，投递成功后应写入 `articles/keywords` 表。
 - **是否支持多语言？** 当前模板为中文；可在 R3 之后扩展多语言 Prompt 与翻译流水线。
 - **开源计划？** 后续将根据路线图开放贡献指南，欢迎提交 Issue 与 PR。
 
-## 13. 文章生成规范（R3）
+## 14. 文章生成规范（R3）
 - **生成目标**：文章需融合影评风格与学术分析，约 2000 字，整体语调冷静理性。
 - **禁止事项**：严格禁止使用第一人称、呼吁性措辞以及引用影视作品台词，确保文本客观中立。
 - **选题范围**：每次生成从数据库 `psychology_themes` 表抽取未使用的「心理学关键词 × 影视角色」组合，覆盖动画、电影与各类剧集中的心理、悬疑、存在主义等主题。
@@ -232,7 +248,7 @@ make run
 
 ---
 如需更多帮助，请在 Issue 中反馈或加入后续讨论。
-## 13. 本轮架构更新（本机持久库 + VPS 无状态）
+## 15. 本轮架构更新（本机持久库 + VPS 无状态）
 ### 架构概览
 - **本机常驻**：持久化数据库仅存在于本机（默认 SQLite，可切换 PostgreSQL）。负责选题规划、used_pairs 去重、runs 统计与关键词池维护。
 - **VPS 临时实例**：每日临时创建，仅读取传入的 `job.json` 与 `.env.runtime`，执行完立刻销毁或由本机回收，不持久化任何密钥。

@@ -9,6 +9,8 @@ from typing import Iterable, Tuple
 
 from autowriter_text.pipeline.postprocess import ArticleRow, collect_articles_for_date
 
+from automation import WeChatAutomator, ZhihuAutomator, connect_chrome_cdp
+
 from exporter.common import ensure_dir, export_index_csv_json
 from exporter.packer import bundle_all, zip_dir
 from exporter.wechat_exporter import export_for_wechat
@@ -32,6 +34,12 @@ def _require_articles(date_str: str) -> list[ArticleRow]:
     if not articles:
         raise SystemExit(f"{date_str} 无可导出的文章，请确认生成流程是否完成。")
     return articles
+
+
+def _select_articles(date_str: str, limit: int) -> list[ArticleRow]:
+    """获取指定日期的文章并限制篇幅。"""
+
+    return _require_articles(date_str)[: max(1, limit)]
 
 
 def _export_wechat(articles: list[ArticleRow], date_str: str, base_dir: Path) -> Tuple[Path, Path]:
@@ -132,6 +140,56 @@ def cmd_copy(args: argparse.Namespace) -> None:
     print("复制流程完成，可开始下一个字段或文章。")
 
 
+def cmd_auto(args: argparse.Namespace) -> None:
+    """处理 auto 子命令，使用本机浏览器自动创建草稿。"""
+
+    date_str = _parse_date(args.date)
+    limit = getattr(args, "limit", 5) or 5
+    articles = _select_articles(date_str, limit)
+    try:
+        context = connect_chrome_cdp(getattr(args, "cdp", "http://127.0.0.1:9222"))
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - Playwright 环境相关
+        raise SystemExit(f"连接 Chrome 失败：{exc}") from exc
+    playwright = getattr(context, "_automation_playwright", None)
+
+    platforms: tuple[str, ...]
+    if args.platform == "wechat":
+        platforms = ("wechat",)
+    elif args.platform == "zhihu":
+        platforms = ("zhihu",)
+    else:
+        platforms = ("wechat", "zhihu")
+
+    try:
+        if "wechat" in platforms:
+            wechat = WeChatAutomator(context)
+            for idx, article in enumerate(articles, start=1):
+                try:
+                    result = wechat.create_draft(
+                        article,
+                        screenshot_prefix=f"wechat_{date_str}_{idx:02d}",
+                    )
+                    print(f"[wechat] {idx:02d}《{article.title}》 -> {result}")
+                except Exception as exc:  # pragma: no cover - 浏览器行为受环境影响
+                    print(f"[wechat] {idx:02d}《{article.title}》 失败：{exc}")
+        if "zhihu" in platforms:
+            zhihu = ZhihuAutomator(context)
+            for idx, article in enumerate(articles, start=1):
+                try:
+                    result = zhihu.create_draft(article)
+                    print(f"[zhihu] {idx:02d}《{article.title}》 -> {result}")
+                except Exception as exc:  # pragma: no cover - 浏览器行为受环境影响
+                    print(f"[zhihu] {idx:02d}《{article.title}》 失败：{exc}")
+    finally:
+        if playwright is not None:
+            try:
+                playwright.stop()
+            except Exception:  # pragma: no cover - Playwright 清理失败时忽略
+                pass
+
+
 def build_parser() -> argparse.ArgumentParser:
     """构建顶级参数解析器。"""
 
@@ -167,6 +225,29 @@ def build_parser() -> argparse.ArgumentParser:
     copy_zhihu.add_argument("--date", help="目标日期，默认当天")
     copy_zhihu.add_argument("--index", type=int, default=1, help="文章序号（从 1 开始）")
     copy_zhihu.set_defaults(func=cmd_copy)
+
+    auto_parser = subparsers.add_parser("auto", help="自动送草稿到目标平台")
+    auto_sub = auto_parser.add_subparsers(dest="platform", required=True)
+
+    auto_wechat = auto_sub.add_parser("wechat", help="送公众号草稿")
+    auto_wechat.add_argument("--date", help="目标日期，默认当天")
+    auto_wechat.add_argument("--limit", type=int, default=5, help="送入草稿的篇数")
+    auto_wechat.add_argument("--cdp", default="http://127.0.0.1:9222", help="Chrome CDP 地址")
+    auto_wechat.set_defaults(func=cmd_auto)
+
+    auto_zhihu = auto_sub.add_parser("zhihu", help="送知乎草稿")
+    auto_zhihu.add_argument("--date", help="目标日期，默认当天")
+    auto_zhihu.add_argument("--limit", type=int, default=5, help="送入草稿的篇数")
+    auto_zhihu.add_argument("--cdp", default="http://127.0.0.1:9222", help="Chrome CDP 地址")
+    auto_zhihu.set_defaults(func=cmd_auto)
+
+    auto_all = auto_sub.add_parser("all", help="两个平台同时送草稿")
+    auto_all.add_argument("--date", help="目标日期，默认当天")
+    auto_all.add_argument("--limit", type=int, default=5, help="送入草稿的篇数")
+    auto_all.add_argument(
+        "--cdp", default="http://127.0.0.1:9222", help="Chrome CDP 地址（两个平台共用）"
+    )
+    auto_all.set_defaults(func=cmd_auto)
 
     return parser
 
