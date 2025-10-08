@@ -9,3 +9,7 @@ __pycache__/
 .mypy_cache/
 pytest_cache/
 .playwright/
+/dist/
+/build/
+/*.spec
+autowriter_desktop/.qt_for_python/
