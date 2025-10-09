@@ -1,94 +1,112 @@
-"""文章去重逻辑实现。
+"""去重策略模块，实现签名唯一、组合唯一以及 SimHash 相似度三道闸机制。"""  # 模块中文文档说明
+from __future__ import annotations  # 引入未来注解语法以保持类型提示兼容性
+from dataclasses import dataclass  # 引入数据类用于封装配置
+from datetime import datetime, timedelta  # 导入时间工具用于窗口判断
+from typing import Optional, Tuple, Dict, Any  # 导入类型提示以增强可读性
+from sqlalchemy import text  # 导入 SQL 构造器用于执行原生查询
+from sqlalchemy.orm import Session  # 引入 SQLAlchemy 会话类型
+from app.dedup.textnorm import (  # 从文本归一化模块导入签名与工具函数
+    title_signature,
+    content_signature,
+    simhash,
+    hamming_distance,
+    normalize_text,
+)  # 保持中文注释行内说明
 
-该模块实现“关键词集合 + 历史表扫描”的最小可用去重策略，并在注释中标注
-后续可扩展语义向量（SimHash/MinHash/Embedding）能力的接口。
-"""
+@dataclass  # 使用数据类简化配置定义
+class DedupConfig:  # 定义去重配置数据结构
+    """去重参数配置，包含 SimHash 阈值及组合窗口。"""  # 数据类中文文档
+    simhash_bits: int = 64  # SimHash 位数
+    simhash_hamming_threshold: int = 3  # 汉明距离阈值，越小越严格
+    day_window: int = 1  # 组合唯一检查的日粒度窗口
+    recent_limit: int = 200  # 相似度扫描时读取的历史文章数量上限
 
-from __future__ import annotations
+def normalize_entities(role: str, work: str, keyword: str, lang: str = "zh") -> Tuple[str, str, str, str]:  # 定义实体归一化函数
+    """对角色、作品、关键词及语言进行归一化处理。"""  # 函数中文文档说明
+    normalized_role = normalize_text(role)  # 归一化角色名称
+    normalized_work = normalize_text(work)  # 归一化作品名称
+    normalized_keyword = normalize_text(keyword)  # 归一化心理学关键词
+    normalized_lang = (lang or "zh").lower()  # 语言代码统一为小写
+    return normalized_role, normalized_work, normalized_keyword, normalized_lang  # 返回归一化结果元组
 
-from typing import Dict, Iterable, Set  # 提供类型标注以增强可读性
-
-from sqlalchemy import Select, func, select  # 导入 SQL 构造器
-from sqlalchemy.orm import Session
-
-from app.db.migrate import SessionLocal  # Session 工厂，生成数据库会话
-from app.db.models import ArticleDraft, Keyword  # ORM 模型，用于查询历史记录
-
-
-class ArticleDeduplicator:
-    """根据关键词与标题进行重复检查的最小实现。"""
-
-    def __init__(self) -> None:
-        """初始化去重服务并缓存 Session 工厂。"""
-
-        self.session_factory = SessionLocal  # 保存 Session 工厂以按需创建连接
-
-    def _normalize_keywords(self, keywords: Iterable[str]) -> Set[str]:
-        """将传入关键词统一为去重后的集合。
-
-        参数:
-            keywords: 任意可迭代的关键词列表。
-        返回:
-            经过去重与大小写归一化后的集合。
+def precheck_by_combo(session: Session, role_slug: str, work_slug: str, psych_keyword: str, lang: str, now: datetime, cfg: DedupConfig) -> bool:  # 定义组合唯一性检查函数
+    """检查同一窗口内角色、作品、关键词和语言组合是否已存在。"""  # 函数中文文档
+    start_date = (now - timedelta(days=cfg.day_window - 1)).date()  # 计算窗口起始日期
+    end_date = now.date()  # 计算窗口结束日期
+    query = text(
         """
-
-        return {keyword.strip().lower() for keyword in keywords if keyword.strip()}  # 去除空白并统一大小写
-
-    def _fetch_existing_keywords(self, session: Session, keywords: Set[str]) -> Set[str]:
-        """查询数据库中与给定集合重叠的关键词。
-
-        参数:
-            session: 打开的 SQLAlchemy Session。
-            keywords: 已归一化的关键词集合。
-        返回:
-            数据库中存在的关键词集合，用于与当前文章比对。
+        SELECT 1
+        FROM articles
+        WHERE role_slug = :role_slug
+          AND work_slug = :work_slug
+          AND psych_keyword = :psych_keyword
+          AND lang = :lang
+          AND date(created_at) BETWEEN :start_date AND :end_date
+        LIMIT 1
         """
+    )  # 构造组合唯一查询 SQL
+    result = session.execute(
+        query,
+        {
+            "role_slug": role_slug,
+            "work_slug": work_slug,
+            "psych_keyword": psych_keyword,
+            "lang": lang,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+    ).first()  # 执行查询并返回首条记录
+    return result is not None  # 若存在记录则表示组合冲突
 
-        if not keywords:  # 若集合为空则直接返回空集
-            return set()
-        keyword_stmt: Select[tuple[str]] = select(  # 构造查询语句
-            Keyword.keyword
-        ).where(
-            Keyword.keyword.in_(keywords)
-        )
-        rows = session.execute(keyword_stmt).scalars().all()  # 执行查询并提取所有关键字字符串
-        return set(rows)  # 转换为集合便于集合运算
+def precheck_by_content_sig(session: Session, content_sig: str) -> bool:  # 定义正文签名检查函数
+    """检查正文签名是否已存在以阻止完全重复文章。"""  # 函数中文文档
+    query = text("SELECT 1 FROM articles WHERE content_signature = :sig LIMIT 1")  # 构造签名唯一查询
+    result = session.execute(query, {"sig": content_sig}).first()  # 执行查询
+    return result is not None  # 返回是否检测到重复
 
-    def _is_title_duplicate(self, session: Session, title: str) -> bool:
-        """判断标题是否在历史表中已存在。"""
-
-        if not title:  # 空标题直接视为不重复，由调用方决定是否允许
-            return False
-        title_stmt: Select[tuple[int]] = select(func.count(ArticleDraft.id)).where(  # 构造计数查询
-            ArticleDraft.title == title
-        )
-        count = session.execute(title_stmt).scalar_one()  # 执行查询并取计数
-        return count > 0  # 大于零表示存在重复标题
-
-    def is_unique(self, article: Dict[str, str]) -> bool:
-        """检查文章是否为新内容。
-
-        参数:
-            article: 包含标题、正文与关键词列表的字典。
-        返回:
-            True 表示未检测到重复，可继续生成/投递。
+def precheck_by_simhash(session: Session, body: str, cfg: DedupConfig) -> Optional[Dict[str, Any]]:  # 定义近似重复检查函数
+    """基于 SimHash 的近似重复检查，返回疑似重复的文章信息。"""  # 函数中文文档
+    target_hash = simhash(body, bits=cfg.simhash_bits)  # 计算待检测正文的 SimHash
+    query = text(
         """
+        SELECT id, content_signature
+        FROM articles
+        WHERE content_signature IS NOT NULL
+        ORDER BY id DESC
+        LIMIT :limit
+        """
+    )  # 构造获取最近文章签名的 SQL
+    rows = session.execute(query, {"limit": cfg.recent_limit}).mappings().all()  # 查询最近若干条文章
+    for row in rows:  # 遍历历史记录
+        signature = row.get("content_signature", "")  # 读取历史签名
+        if not signature:  # 若为空则跳过
+            continue  # 继续下一条
+        try:
+            simhash_hex = signature.split("-")[-1]  # 提取签名中的 SimHash 部分
+            other_hash = int(simhash_hex, 16)  # 将十六进制转换为整数
+        except ValueError:
+            continue  # 若解析失败则跳过该记录
+        distance = hamming_distance(target_hash, other_hash)  # 计算汉明距离
+        if distance <= cfg.simhash_hamming_threshold:  # 判断是否在相似阈值内
+            return {"id": row["id"], "content_signature": signature, "distance": distance}  # 返回疑似重复信息
+    return None  # 未命中相似文章返回空值
 
-        title = article.get("title", "")  # 读取标题用于对比
-        keyword_list = article.get("keywords", [])  # 读取关键词列表
-        normalized_keywords = self._normalize_keywords(keyword_list)  # 归一化关键词集合
-
-        with self.session_factory() as session:  # 打开数据库会话，并确保自动关闭
-            if self._is_title_duplicate(session, title):  # 首先基于标题快速判重
-                return False  # 标题已存在直接视为重复
-
-            overlapping_keywords = self._fetch_existing_keywords(  # 查询关键词重叠情况
-                session, normalized_keywords
-            )
-            if overlapping_keywords:  # 若存在关键词交集
-                # TODO: 在后续版本中，可在此结合关键词权重或文章摘要实现更精细的重复判定。
-                return False
-
-        return True  # 无标题冲突且关键词未命中，则视为新内容
-
-    # TODO: 提供 register_article 接口，在文章投递成功后写入关键词与摘要，便于语义去重。
+def decide_dedup(session: Session, title: str, body: str, role: str, work: str, keyword: str, lang: str, now: datetime, cfg: DedupConfig) -> Dict[str, Any]:  # 定义综合去重判定函数
+    """整合三道闸逻辑并返回包含签名与检测结果的字典。"""  # 函数中文文档
+    title_sig = title_signature(title)  # 计算标题签名
+    content_sig = content_signature(body)  # 计算正文签名
+    role_slug, work_slug, psych_keyword, normalized_lang = normalize_entities(role, work, keyword, lang)  # 归一化实体
+    combo_conflict = precheck_by_combo(session, role_slug, work_slug, psych_keyword, normalized_lang, now, cfg)  # 检查组合冲突
+    signature_conflict = precheck_by_content_sig(session, content_sig)  # 检查签名冲突
+    near_duplicate = precheck_by_simhash(session, body, cfg)  # 检测近似重复
+    return {
+        "title_signature": title_sig,
+        "content_signature": content_sig,
+        "role_slug": role_slug,
+        "work_slug": work_slug,
+        "psych_keyword": psych_keyword,
+        "lang": normalized_lang,
+        "combo_conflict": combo_conflict,
+        "signature_conflict": signature_conflict,
+        "near_duplicate": near_duplicate,
+    }  # 返回综合判定结果

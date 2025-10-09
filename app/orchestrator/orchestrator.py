@@ -14,6 +14,7 @@ from app.db import models  # 导入 ORM 模型
 from app.db.migrate import SessionLocal  # 获取 Session 工厂
 from app.orchestrator import parsers, ssh_runner, vps_job_packager  # 引入 orchestrator 子模块
 from app.generator.article_generator import lease_theme_for_run, release_theme_lock  # TODO: 导入软锁操作
+from app.generator.persistence import insert_article_tx  # 新增导入用于执行去重与事务落库
 
 
 def _split_traits(traits: str) -> List[str]:
@@ -125,24 +126,33 @@ def finalize_theme_used(db: Session, theme_id: int, run_id: str) -> None:
     db.commit()
 
 
-def orchestrate_once(settings, db: Session, run_id: str) -> None:
-    """基于软锁的单次 orchestrator 执行入口。"""
+def orchestrate_once(settings, db: Session, run_id: str) -> None:  # 定义 orchestrator 单次执行入口
+    """基于软锁的单次 orchestrator 执行入口，串起领取主题与去重落库流程。"""  # 函数中文说明
 
-    theme = lease_theme_for_run(db, run_id=run_id)
-    if not theme:
-        # TODO: 打印无可用主题
-        return
+    theme = lease_theme_for_run(db, run_id=run_id)  # 领取一条待生成的主题并打上软锁
+    if not theme:  # 判断是否成功领取主题
+        print("⚠️ 无可用主题")  # 记录提示信息
+        return  # 无主题时直接返回
 
     try:
-        # TODO: 调用真实投递逻辑
-        ok = True
-        if ok:
-            finalize_theme_used(db, theme_id=theme["id"], run_id=run_id)
-        else:
-            release_theme_lock(db, theme_id=theme["id"])
-    except Exception:  # noqa: BLE001
-        release_theme_lock(db, theme_id=theme["id"])
-        raise
+        title = theme.get("psychology_definition") or f"{theme.get('psychology_keyword', '')} 心理解析"  # 使用主题定义或构造标题
+        body = f"占位正文：角色={theme.get('character_name','')}, 作品={theme.get('show_name','')}, 关键词={theme.get('psychology_keyword','')}"  # 构造占位正文确保流程连通
+        result = insert_article_tx(  # 调用去重与事务落库逻辑
+            session=db,  # 传入当前数据库会话
+            title=title,  # 指定生成的标题文本
+            body=body,  # 指定生成的正文内容
+            role=theme.get("character_name", ""),  # 指定角色来源
+            work=theme.get("show_name", ""),  # 指定作品来源
+            keyword=theme.get("psychology_keyword", ""),  # 指定心理学关键词
+            lang="zh",  # 指定语言代码
+            run_id=run_id,  # 传入当前运行标识
+        )
+        article_id = result["article_id"]  # 获取新写入文章的 ID
+        print(f"✅ 写入文章 ID={article_id}")  # 输出成功日志
+    except Exception as exc:  # noqa: BLE001  # 捕获所有异常以便回滚软锁
+        print(f"❌ 生成或落库失败: {exc}")  # 打印失败原因
+        release_theme_lock(db, theme_id=theme["id"])  # 释放主题软锁避免题目被吃掉
+        raise  # 将异常继续抛出交由上层处理
 
 
 def build_job_payload(run_id: str, run_date: date, topics: List[dict]) -> dict:
