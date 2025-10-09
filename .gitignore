@@ -13,3 +13,17 @@ pytest_cache/
 /build/
 /*.spec
 autowriter_desktop/.qt_for_python/
+
+# AutoWriter runtime artifacts
+.env.runtime
+*.db
+/tmp/
+jobs/
+__pycache__/
+*.pyc
+
+# App data (迁出仓库，可留此以防误放)
+autowriter.db
+exports/
+logs/
+reports/

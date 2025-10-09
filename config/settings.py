@@ -1,23 +1,30 @@
-"""应用统一配置加载模块。
-
-该模块负责：
-* 解析 .env 文件与系统环境变量；
-* 聚合数据库、调度策略、SSH 等配置；
-* 暴露 ``settings`` 对象供 orchestrator 与 worker 调用。
-"""
+# -*- coding: utf-8 -*-
+"""应用统一配置加载模块，聚合路径、安全与凭据校验逻辑。"""
 
 from __future__ import annotations
 
-import os  # 读取环境变量
-from dataclasses import dataclass  # 构造配置数据类
-from pathlib import Path  # 处理文件路径
-from dotenv import load_dotenv  # 用于加载 .env 文件内容
+import os  # TODO: 读取环境变量，确保兼容现有部署
+import re  # TODO: 新增凭据正则校验，阻止格式错误
+from dataclasses import dataclass, field  # TODO: 引入 field 以设置目录默认值
+from pathlib import Path  # TODO: 处理文件路径，避免字符串硬编码
+from typing import List  # TODO: 返回凭据校验错误列表
 
-BASE_DIR = Path(__file__).resolve().parent.parent  # 计算项目根目录，便于定位资源文件
-ENV_PATH = BASE_DIR / ".env"  # 默认环境变量文件路径
+from dotenv import load_dotenv  # TODO: 继续支持 .env 加载
 
-if ENV_PATH.exists():  # 若存在 .env 文件则加载
-    load_dotenv(ENV_PATH)  # 使用 python-dotenv 读取配置，支持本地开发
+from app.utils.paths import ensure_subdir, get_app_data_dir  # TODO: 使用统一数据目录入口
+
+BASE_DIR = Path(__file__).resolve().parent.parent  # TODO: 保留仓库根目录定位逻辑
+ENV_PATH = BASE_DIR / ".env"  # TODO: 默认环境变量文件路径保持不变
+
+if ENV_PATH.exists():  # TODO: 若存在 .env 文件则加载，兼容原有流程
+    load_dotenv(ENV_PATH)  # TODO: 使用 python-dotenv 读取配置，支持本地开发
+
+
+class ConfigError(Exception):
+    """配置/凭据不合法时抛出该异常，并附带可读信息。"""
+
+    # TODO: 自定义异常便于调用方明确捕获配置问题
+    pass
 
 
 @dataclass(slots=True)
@@ -78,18 +85,118 @@ class PlatformCredentials:
 class Settings:
     """封装应用所有配置的主数据类。"""
 
-    database: DatabaseConfig  # 数据库连接信息
-    orchestrator: OrchestratorConfig  # 调度与策略
-    ssh: SSHConfig  # SSH 链接配置
-    scheduler: SchedulerConfig  # cron 配置
-    platform_credentials: PlatformCredentials  # 平台凭据
-    openai_api_key: str = ""  # 兼容历史逻辑保留字段
+    # === 存储相关 ===
+    app_dir: Path = field(default_factory=get_app_data_dir)  # TODO: 使用统一应用目录，避免污染仓库
+    data_dir: Path = field(default_factory=lambda: ensure_subdir("data"))  # TODO: 数据库存放路径
+    logs_dir: Path = field(default_factory=lambda: ensure_subdir("logs"))  # TODO: 日志输出目录
+    exports_dir: Path = field(default_factory=lambda: ensure_subdir("exports"))  # TODO: 导出文件目录
+    tmp_dir: Path = field(default_factory=lambda: ensure_subdir("tmp"))  # TODO: 临时文件目录
+    sqlite_url: str = field(
+        default_factory=lambda: f"sqlite:///{(ensure_subdir('data') / 'autowriter.db').as_posix()}"
+    )  # TODO: 默认 SQLite 数据库迁移到应用目录
+
+    # === 平台开关与凭据 ===
+    enable_wechat_mp: bool = False  # TODO: 微信公众号默认关闭
+    wechat_mp_cookie: str | None = None  # TODO: 按需注入 cookie
+
+    enable_zhihu: bool = False  # TODO: 知乎默认关闭
+    zhihu_cookie: str | None = None  # TODO: 保存知乎 cookie
+
+    enable_medium: bool = False  # TODO: Medium 默认关闭
+    medium_token: str | None = None  # TODO: Medium token
+
+    enable_wordpress: bool = False  # TODO: WordPress 默认关闭
+    wp_url: str | None = None  # TODO: WordPress 站点 URL
+    wp_user: str | None = None  # TODO: WordPress 用户名
+    wp_app_pass: str | None = None  # TODO: WordPress 应用密码
+
+    # === 主题生命周期参数 ===
+    lock_expire_minutes: int = 90  # TODO: 软锁超时时长，单位分钟
+
+    # === 保持原有字段 ===
+    database: DatabaseConfig = field(
+        default_factory=lambda: DatabaseConfig(
+            url=f"sqlite:///{(ensure_subdir('data') / 'autowriter.db').as_posix()}"
+        )
+    )  # TODO: 兼容旧逻辑，仍提供 DatabaseConfig
+    orchestrator: OrchestratorConfig = field(
+        default_factory=lambda: OrchestratorConfig(
+            daily_article_count=3,
+            keyword_recent_cooldown_days=30,
+            postrun_enrich_group_size=3,
+            enable_postrun_enrich=True,
+            timezone="Asia/Tokyo",
+        )
+    )  # TODO: 默认 orchestrator 参数
+    ssh: SSHConfig = field(
+        default_factory=lambda: SSHConfig(
+            host="",
+            user="",
+            port=22,
+            key_path="",
+            workdir=str(ensure_subdir("tmp") / "vps"),
+        )
+    )  # TODO: 默认 SSH 配置指向 tmp 子目录
+    scheduler: SchedulerConfig = field(
+        default_factory=lambda: SchedulerConfig(cron_expression="0 9 * * *")
+    )  # TODO: 默认调度表达式
+    platform_credentials: PlatformCredentials = field(
+        default_factory=lambda: PlatformCredentials(
+            wordpress_base_url="",
+            wordpress_username="",
+            wordpress_app_password="",
+            medium_integration_token="",
+            wechat_app_id="",
+            wechat_app_secret="",
+        )
+    )  # TODO: 保留旧凭据对象供兼容
+    openai_api_key: str = ""  # TODO: 兼容历史逻辑保留字段
 
     @property
     def timezone(self) -> str:
         """向后兼容属性，返回 orchestrator 时区。"""
 
         return self.orchestrator.timezone
+
+    def validate_credentials(self) -> List[str]:
+        """对已启用的平台做“必填/形状”校验，返回错误列表。"""
+
+        # TODO: 校验逻辑返回错误集合而非抛出异常，供 CLI 决策
+        errs: List[str] = []
+
+        if self.enable_wechat_mp:
+            if not self.wechat_mp_cookie:
+                errs.append("WeChatMP: 缺少 wechat_mp_cookie")
+            elif "passport.wechat.com" in (self.wechat_mp_cookie or ""):
+                errs.append("WeChatMP: cookie 看起来像登录页而非业务 cookie，请重新抓取。")
+
+        if self.enable_zhihu:
+            if not self.zhihu_cookie:
+                errs.append("Zhihu: 缺少 zhihu_cookie")
+
+        if self.enable_medium:
+            if not self.medium_token or len(self.medium_token) < 20:
+                errs.append("Medium: 缺少或疑似无效的 medium_token")
+
+        if self.enable_wordpress:
+            url_pat = re.compile(r"^https?://")
+            if not self.wp_url or not url_pat.match(self.wp_url):
+                errs.append("WordPress: wp_url 缺失或格式错误")
+            if not self.wp_user:
+                errs.append("WordPress: wp_user 缺失")
+            if not self.wp_app_pass or len(self.wp_app_pass) < 8:
+                errs.append("WordPress: wp_app_pass 缺失或过短")
+
+        for p in [self.data_dir, self.logs_dir, self.exports_dir, self.tmp_dir]:
+            try:
+                p.mkdir(parents=True, exist_ok=True)
+                test = p / ".writable.test"
+                test.write_text("ok", encoding="utf-8")
+                test.unlink(missing_ok=True)
+            except Exception as exc:  # noqa: BLE001
+                errs.append(f"目录不可写: {p} -> {exc!r}")
+
+        return errs
 
 
 def _get_env_int(name: str, default: int) -> int:
@@ -113,8 +220,9 @@ def _get_env_bool(name: str, default: bool) -> bool:
 def get_settings() -> Settings:
     """读取环境变量并生成配置对象。"""
 
-    # 数据库：优先使用 DB_URL，兼容历史 DATABASE_URL
-    db_url = os.getenv("DB_URL") or os.getenv("DATABASE_URL", "sqlite:///./autowriter_local.db")
+    # TODO: 统一默认 SQLite 路径到应用数据目录
+    default_sqlite_url = f"sqlite:///{(ensure_subdir('data') / 'autowriter.db').as_posix()}"
+    db_url = os.getenv("DB_URL") or os.getenv("DATABASE_URL") or default_sqlite_url
 
     orchestrator_config = OrchestratorConfig(
         daily_article_count=_get_env_int("DAILY_ARTICLE_COUNT", 3),
@@ -128,12 +236,13 @@ def get_settings() -> Settings:
         cron_expression=os.getenv("SCHEDULE_CRON", "0 9 * * *"),
     )
 
+    tmp_workdir = os.getenv("VPS_WORKDIR") or str(ensure_subdir("tmp") / "vps")
     ssh_config = SSHConfig(
         host=os.getenv("VPS_SSH_HOST", ""),
         user=os.getenv("VPS_SSH_USER", ""),
         port=_get_env_int("VPS_SSH_PORT", 22),
         key_path=os.getenv("VPS_SSH_KEY_PATH", ""),
-        workdir=os.getenv("VPS_WORKDIR", "/tmp/autowriter_run"),
+        workdir=tmp_workdir,
     )
 
     platform_credentials = PlatformCredentials(
@@ -145,14 +254,27 @@ def get_settings() -> Settings:
         wechat_app_secret=os.getenv("WECHAT_APP_SECRET", ""),
     )
 
-    return Settings(
+    settings_obj = Settings(
+        sqlite_url=default_sqlite_url,
         database=DatabaseConfig(url=db_url),
         orchestrator=orchestrator_config,
         ssh=ssh_config,
         scheduler=scheduler_config,
         platform_credentials=platform_credentials,
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+        enable_wechat_mp=_get_env_bool("ENABLE_WECHAT_MP", False),
+        wechat_mp_cookie=os.getenv("WECHAT_MP_COOKIE"),
+        enable_zhihu=_get_env_bool("ENABLE_ZHIHU", False),
+        zhihu_cookie=os.getenv("ZHIHU_COOKIE"),
+        enable_medium=_get_env_bool("ENABLE_MEDIUM", False),
+        medium_token=os.getenv("MEDIUM_TOKEN"),
+        enable_wordpress=_get_env_bool("ENABLE_WORDPRESS", False),
+        wp_url=os.getenv("WP_URL"),
+        wp_user=os.getenv("WP_USER"),
+        wp_app_pass=os.getenv("WP_APP_PASS"),
     )
+
+    return settings_obj
 
 
 settings = get_settings()  # 模块级别创建配置实例，供其他模块直接引用
