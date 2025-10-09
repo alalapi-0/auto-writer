@@ -20,6 +20,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "human_delay_min": 1,
     "human_delay_max": 3,
     "continue_on_error": False,
+    "schedule_enabled": False,
+    "schedule_time": "09:00",
+    "schedule_days": "daily",
+    "schedule_cmd": "full",
+    "schedule_custom_cli": "",
+    "schedule_custom_days": "",
+    "fail_retry": 0,
+    "fail_interval": 60,
 }
 
 
