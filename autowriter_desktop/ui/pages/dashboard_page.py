@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Callable, List, Tuple
 
 from PySide6.QtCore import QThread
@@ -29,12 +30,14 @@ class WorkflowThread(QThread):
         self.steps = steps
         self.continue_on_error = continue_on_error
         self.signals = TaskSignals()
+        self.last_result_path: Path | None = None
 
     def run(self) -> None:  # type: ignore[override]
         exit_code = 0
         try:
             for index, step in enumerate(self.steps, start=1):
                 code, result_path = step()
+                self.last_result_path = result_path
                 self.signals.progress.emit(f"步骤 {index} 完成，返回码 {code}，输出目录 {result_path}")
                 if code != 0 and not self.continue_on_error:
                     exit_code = code
@@ -58,6 +61,8 @@ class DashboardPage(QWidget):
         self.auto_only_button = QPushButton("仅送草稿", self)
         self.cancel_button = QPushButton("取消当前任务", self)
         self._current_thread: WorkflowThread | None = None
+        self._current_task_date: str | None = None
+        self._manual_attention_required = False
         self._build_ui()
         self.refresh_summary()
 
@@ -125,19 +130,22 @@ class DashboardPage(QWidget):
         self.console.clear()
         config = self.main_window.config
         today = datetime.now().strftime("%Y-%m-%d")
+        self._current_task_date = today
+        self._manual_attention_required = False
         # 组合顺序执行的步骤：生成 -> 导出 -> 自动送草稿
         steps = [
-            lambda: runner.run_generate(config.get("default_count", 5), self.console.append_line),
-            lambda: runner.run_export("all", today, self.console.append_line),
-            lambda: runner.run_auto(
-                "all",
+            lambda: runner.run_full_pipeline(
+                config.get("default_count", 5),
                 today,
                 config.get("cdp_port", 9222),
-                self.console.append_line,
-                max_retries=config.get("retry_max"),
-                min_interval=config.get("min_interval"),
-                max_interval=config.get("max_interval"),
-            ),
+                self._handle_console_line,
+                bool(config.get("continue_on_error")),
+                config.get("retry_max"),
+                config.get("min_interval"),
+                config.get("max_interval"),
+                int(config.get("fail_retry", 0)),
+                int(config.get("fail_interval", 60)),
+            )
         ]
         self._start_thread(steps, bool(config.get("continue_on_error")))
 
@@ -149,13 +157,15 @@ class DashboardPage(QWidget):
         self.console.clear()
         config = self.main_window.config
         today = datetime.now().strftime("%Y-%m-%d")
+        self._current_task_date = today
+        self._manual_attention_required = False
         # 仅执行送草稿
         steps = [
             lambda: runner.run_auto(
                 "all",
                 today,
                 config.get("cdp_port", 9222),
-                self.console.append_line,
+                self._handle_console_line,
                 max_retries=config.get("retry_max"),
                 min_interval=config.get("min_interval"),
                 max_interval=config.get("max_interval"),
@@ -176,12 +186,33 @@ class DashboardPage(QWidget):
     def _on_thread_finished(self, code: int) -> None:
         self.full_flow_button.setEnabled(True)
         self.auto_only_button.setEnabled(True)
+        result_path = None
+        if self._current_thread:
+            result_path = self._current_thread.last_result_path
+        self._current_thread = None
         if code == 0:
             self.console.append_line("任务完成")
+            self.main_window.tray.show_info("AutoWriter", "任务执行成功")
         else:
             self.console.append_line(f"任务以返回码 {code} 结束")
+            log_dir = result_path or (paths.automation_log_dir(self._current_task_date) if self._current_task_date else paths.automation_log_dir(datetime.now().strftime("%Y-%m-%d")))
+            self.main_window.tray.show_info("AutoWriter", "任务失败，点击查看日志", str(log_dir))
+        if self._manual_attention_required:
+            QMessageBox.warning(self, "AutoWriter", "检测到需要人工处理的提示，请查看控制台输出")
+            self._manual_attention_required = False
+        self._current_task_date = None
         self.refresh_summary()
 
     def on_page_activated(self) -> None:
         """页面切换时刷新。"""
         self.refresh_summary()
+
+    def _handle_console_line(self, line: str) -> None:
+        """写入控制台并检查异常提示。"""
+
+        lower = line.lower()
+        if any(keyword in line for keyword in ["请登录", "验证码", "人工", "批量失败", "全部失败"]):
+            self._manual_attention_required = True
+        if "失败" in lower and "成功" not in lower:
+            self._manual_attention_required = True
+        self.console.append_line(line)

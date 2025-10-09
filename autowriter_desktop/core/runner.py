@@ -4,6 +4,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
@@ -101,3 +102,59 @@ def run_auto(
     return_code, log_dir = run_cli(args, on_line)
     target_dir = paths.automation_log_dir(date)
     return return_code, target_dir
+
+
+def run_full_pipeline(
+    count: int,
+    date: str,
+    cdp_port: int,
+    on_line: Callable[[str], None],
+    continue_on_error: bool = False,
+    max_retries: Optional[int] = None,
+    min_interval: Optional[int] = None,
+    max_interval: Optional[int] = None,
+    fail_retry: int = 0,
+    fail_interval: int = 60,
+) -> Tuple[int, Path]:
+    """串行执行生成、导出以及送草稿。"""
+
+    # 首先执行生成步骤
+    on_line("开始执行每日生成任务")
+    gen_code, _ = run_generate(count, on_line)
+    if gen_code != 0 and not continue_on_error:
+        on_line(f"生成步骤失败，返回码 {gen_code}")
+        return gen_code, paths.exports_dir()
+
+    # 紧接着执行导出
+    on_line("开始执行导出任务")
+    export_code, _ = run_export("all", date, on_line)
+    if export_code != 0 and not continue_on_error:
+        on_line(f"导出步骤失败，返回码 {export_code}")
+        return export_code, paths.exports_dir(date)
+
+    # 最后执行自动送草稿
+    attempt = 0
+    final_code = 1
+    log_dir = paths.automation_log_dir(date)
+    while attempt == 0 or (final_code != 0 and attempt < fail_retry + 1):
+        if attempt > 0:
+            on_line(f"准备第 {attempt} 次送草稿重试，等待 {fail_interval} 秒")
+            time.sleep(max(fail_interval, 1))
+        on_line("开始执行自动送草稿")
+        final_code, log_dir = run_auto(
+            "all",
+            date,
+            cdp_port,
+            on_line,
+            max_retries=max_retries,
+            min_interval=min_interval,
+            max_interval=max_interval,
+        )
+        attempt += 1
+        if final_code == 0:
+            break
+    if final_code != 0:
+        on_line(f"自动送草稿失败，最终返回码 {final_code}")
+    else:
+        on_line("全流程执行完成")
+    return final_code, log_dir
