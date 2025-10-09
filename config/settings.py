@@ -3,11 +3,11 @@
 
 from __future__ import annotations
 
-import os  # TODO: 读取环境变量，确保兼容现有部署
-import re  # TODO: 新增凭据正则校验，阻止格式错误
-from dataclasses import dataclass, field  # TODO: 引入 field 以设置目录默认值
-from pathlib import Path  # TODO: 处理文件路径，避免字符串硬编码
-from typing import List  # TODO: 返回凭据校验错误列表
+import os  # 使用标准库 os 读取环境变量，兼容部署时的配置注入
+import re  # 使用正则表达式校验部分凭据形状，避免格式错误
+from dataclasses import dataclass, field  # 从 dataclasses 导入 dataclass 与 field 以构建配置数据类
+from pathlib import Path  # 使用 Path 统一处理文件路径，避免硬编码字符串
+from typing import List  # 引入 List 类型注解以提升可读性
 
 from dotenv import load_dotenv  # TODO: 继续支持 .env 加载
 
@@ -38,13 +38,17 @@ def _parse_int(raw: str | None, default: int) -> int:  # 新增: 安全解析整
         return default  # 新增: 回退到默认值
 
 
-DELIVERY_ENABLED_PLATFORMS = _parse_platform_list(  # 新增: 定义平台开关默认值
-    os.getenv("DELIVERY_ENABLED_PLATFORMS"),  # 新增: 读取环境变量覆盖
-    ["wechat_mp", "zhihu"],  # 新增: 默认启用公众号与知乎
-)  # 新增: 结束平台列表定义
-OUTBOX_DIR = os.getenv("OUTBOX_DIR", "./outbox")  # 新增: 定义草稿产出目录
-RETRY_BASE_SECONDS = _parse_int(os.getenv("RETRY_BASE_SECONDS"), 300)  # 新增: 定义重试基础秒数
-RETRY_MAX_ATTEMPTS = _parse_int(os.getenv("RETRY_MAX_ATTEMPTS"), 5)  # 新增: 定义最大重试次数
+DELIVERY_ENABLED_PLATFORMS = _parse_platform_list(  # 从环境变量解析启用的平台列表
+    os.getenv("DELIVERY_ENABLED_PLATFORMS"),  # 读取 DELIVERY_ENABLED_PLATFORMS 环境变量用于覆盖默认值
+    ["wechat_mp", "zhihu"],  # 默认启用微信公众号与知乎平台
+)  # 结束平台列表常量定义
+OUTBOX_DIR = os.getenv("OUTBOX_DIR", "./outbox")  # 读取 OUTBOX_DIR 环境变量，默认输出到 ./outbox
+LOG_DIR = os.getenv("LOG_DIR", "./logs")  # 读取 LOG_DIR 环境变量，默认日志目录为 ./logs
+EXPORT_DIR = os.getenv("EXPORT_DIR", "./exports")  # 读取 EXPORT_DIR 环境变量，默认导出目录为 ./exports
+RETRY_BASE_SECONDS = _parse_int(os.getenv("RETRY_BASE_SECONDS"), 300)  # 读取 RETRY_BASE_SECONDS 环境变量，默认 300 秒
+RETRY_MAX_ATTEMPTS = _parse_int(os.getenv("RETRY_MAX_ATTEMPTS"), 5)  # 读取 RETRY_MAX_ATTEMPTS 环境变量，默认重试 5 次
+THEME_LOW_WATERMARK = _parse_int(os.getenv("THEME_LOW_WATERMARK"), 20)  # 读取 THEME_LOW_WATERMARK 环境变量，默认低水位 20
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()  # 读取 LOG_LEVEL 环境变量控制日志级别，默认 INFO
 
 
 class ConfigError(Exception):
@@ -145,6 +149,7 @@ class Settings:
     outbox_dir: str = "./outbox"  # 新增: 草稿输出目录默认值
     retry_base_seconds: int = 300  # 新增: 重试基础秒数默认值
     retry_max_attempts: int = 5  # 新增: 最大重试次数默认值
+    theme_low_watermark: int = 20  # 新增: 主题库存低水位默认值
 
     # === 保持原有字段 ===
     database: DatabaseConfig = field(
@@ -309,9 +314,49 @@ def get_settings() -> Settings:
         outbox_dir=OUTBOX_DIR,  # 新增: 注入 outbox 目录
         retry_base_seconds=RETRY_BASE_SECONDS,  # 新增: 注入重试基础秒数
         retry_max_attempts=RETRY_MAX_ATTEMPTS,  # 新增: 注入最大重试次数
+        logs_dir=Path(LOG_DIR),  # 新增: 使用环境变量指定日志目录
+        exports_dir=Path(EXPORT_DIR),  # 新增: 使用环境变量指定导出目录
+        theme_low_watermark=THEME_LOW_WATERMARK,  # 新增: 使用环境变量覆盖主题低水位
     )
 
     return settings_obj
 
 
 settings = get_settings()  # 模块级别创建配置实例，供其他模块直接引用
+
+
+def _mask_value(value: str | None) -> str:  # 定义内部函数用于屏蔽敏感配置
+    """对敏感信息进行脱敏，保留首尾字符。"""  # 中文文档说明函数用途
+
+    if not value:  # 当值为空时直接返回空字符串
+        return ""  # 返回空串避免打印 None
+    if len(value) <= 4:  # 若字符串过短则直接返回掩码
+        return "*" * len(value)  # 以相同长度的星号替代
+    return f"{value[0]}{'*' * (len(value) - 2)}{value[-1]}"  # 保留首尾字符并遮蔽中间部分
+
+
+def print_config(mask_secrets: bool = True) -> None:  # 定义打印配置的便捷函数
+    """输出关键配置，支持屏蔽敏感字段。"""  # 函数中文说明
+
+    config_items = [  # 构造待打印配置项列表
+        ("数据库 URL", settings.database.url, True),  # 数据库连接字符串属于敏感信息
+        ("SQLite URL", settings.sqlite_url, False),  # SQLite 本地路径相对不敏感
+        ("OUTBOX_DIR", settings.outbox_dir, False),  # 草稿输出目录
+        ("LOG_DIR", str(settings.logs_dir), False),  # 日志目录
+        ("EXPORT_DIR", str(settings.exports_dir), False),  # 导出目录
+        ("重试基础秒数", str(settings.retry_base_seconds), False),  # 重试初始间隔
+        ("最大重试次数", str(settings.retry_max_attempts), False),  # 重试上限
+        ("主题低水位", str(settings.theme_low_watermark), False),  # 主题库存低水位
+        ("启用平台", ",".join(settings.delivery_enabled_platforms), False),  # 平台启用列表
+        ("OpenAI Key", settings.openai_api_key, True),  # OpenAI 凭据需脱敏
+        ("WeChat Cookie", settings.wechat_mp_cookie or "", True),  # 微信凭据
+        ("Zhihu Cookie", settings.zhihu_cookie or "", True),  # 知乎凭据
+        ("Medium Token", settings.medium_token or "", True),  # Medium 凭据
+        ("WordPress URL", settings.wp_url or "", False),  # WordPress 站点信息
+        ("日志级别", LOG_LEVEL, False),  # 当前日志级别
+    ]  # 列表定义结束
+
+    print("当前配置概览:")  # 打印标题
+    for label, value, sensitive in config_items:  # 遍历配置项
+        display_value = _mask_value(value) if mask_secrets and sensitive else value  # 根据敏感标记决定是否脱敏
+        print(f" - {label}: {display_value}")  # 逐行输出键值对

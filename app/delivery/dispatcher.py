@@ -8,6 +8,8 @@ from typing import Dict  # 类型提示
 from sqlalchemy import text  # 执行原生 SQL
 from sqlalchemy.orm import Session  # 引入会话类型
 
+from app.utils.logger import get_logger  # 引入统一日志模块
+
 from app.delivery.registry import get_registry  # 加载适配器注册表
 from app.delivery.types import DeliveryResult  # 引入统一返回结构
 
@@ -37,10 +39,13 @@ def _coerce_datetime(raw):
     if raw is None:  # 空值直接返回
         return None  # 返回 None
     if isinstance(raw, datetime):  # 已是 datetime
-        return raw  # 直接返回
+        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)  # 保证带时区
     if isinstance(raw, str):  # 若为字符串
         try:
-            return datetime.fromisoformat(raw)  # 按 ISO 格式解析
+            parsed = datetime.fromisoformat(raw)  # 按 ISO 格式解析
+            if parsed.tzinfo is None:  # 若解析结果无时区
+                parsed = parsed.replace(tzinfo=timezone.utc)  # 补充 UTC 时区
+            return parsed  # 返回规范化时间
         except ValueError:  # 解析失败
             return None  # 返回空
     return None  # 其他类型不支持
@@ -50,11 +55,14 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
     """针对单篇文章触发所有启用平台的投递流程。"""  # 函数中文文档
 
     registry = get_registry(settings)  # 获取平台适配器
+    LOGGER.info("准备投递文章 article_id=%s platforms=%s", article_id, list(registry.keys()))  # 记录投递任务启动
     if not registry:  # 若无启用平台
+        LOGGER.warning("未启用投递平台 article_id=%s", article_id)  # 记录提示信息
         return {}  # 直接返回空结果
     article_stmt = text("SELECT * FROM articles WHERE id = :id")  # 查询文章 SQL
     article_row = db.execute(article_stmt, {"id": article_id}).mappings().first()  # 执行查询
     if article_row is None:  # 未找到文章
+        LOGGER.error("文章不存在，无法投递 article_id=%s", article_id)  # 输出错误日志
         raise ValueError("article not found")  # 抛出异常
     article = dict(article_row)  # 转换为字典
     results: Dict[str, DeliveryResult] = {}  # 初始化结果
@@ -75,11 +83,18 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
         can_run = False  # 默认不可执行
         attempts_so_far = 0  # 当前尝试次数
         if log is None:  # 首次投递
+            LOGGER.info("首次平台投递 platform=%s article_id=%s", platform, article_id)  # 记录首次投递
             can_run = True  # 可以执行
         else:
             attempts_so_far = int(log.get("attempt_count") or 0)  # 读取历史次数
             status = log.get("status") or "pending"  # 读取状态
             if status in {"success", "prepared", "skipped"}:  # 已完成的状态
+                LOGGER.info(  # 已完成的平台直接跳过
+                    "平台已完成 platform=%s article_id=%s status=%s",
+                    platform,
+                    article_id,
+                    status,
+                )
                 results[platform] = DeliveryResult(  # 构造返回
                     platform=platform,
                     status=status,  # 原始状态
@@ -90,6 +105,12 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                 )
                 continue  # 跳过
             if attempts_so_far >= max_attempts:  # 超过重试上限
+                LOGGER.warning(  # 记录超过重试上限的情况
+                    "达到重试上限 article_id=%s platform=%s attempts=%s",
+                    article_id,
+                    platform,
+                    attempts_so_far,
+                )
                 results[platform] = DeliveryResult(  # 返回失败状态
                     platform=platform,
                     status=status,
@@ -103,6 +124,12 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
             if next_retry_at is None or now >= next_retry_at:  # 判断是否到期
                 can_run = True  # 可以执行
         if not can_run:  # 未到执行窗口
+            LOGGER.info(  # 记录等待重试的情况
+                "等待下一次重试 article_id=%s platform=%s next_retry_at=%s",
+                article_id,
+                platform,
+                log.get("next_retry_at") if log else None,
+            )
             results[platform] = DeliveryResult(  # 返回原状态
                 platform=platform,
                 status=log.get("status") if log else "pending",
@@ -113,6 +140,12 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
             )
             continue  # 处理下个平台
         try:
+            LOGGER.info(  # 记录本次平台投递开始
+                "执行平台投递 article_id=%s platform=%s attempt=%s",
+                article_id,
+                platform,
+                attempts_so_far + 1,
+            )
             res = adapter(article, settings)  # 调用适配器
             payload_json = json.dumps(res.payload or {}, ensure_ascii=False)  # 序列化 payload
             ok_flag = res.status in {"prepared", "queued", "success"}  # 判断成功
@@ -132,7 +165,8 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                             attempt_count,
                             last_error,
                             next_retry_at,
-                            payload
+                            payload,
+                            created_at
                         )
                         VALUES (
                             :aid,
@@ -145,7 +179,8 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                             :ac,
                             :last_err,
                             :nra,
-                            :pl
+                            :pl,
+                            :created_at
                         )
                         """
                     )  # 插入语句
@@ -163,6 +198,7 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                             "last_err": res.error,
                             "nra": None,
                             "pl": payload_json,
+                            "created_at": now.isoformat(),
                         },
                     )  # 执行插入
                 else:
@@ -201,14 +237,32 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                         },
                     )  # 执行更新
                 trans.commit()  # 提交事务
+                LOGGER.info(  # 记录事务提交成功
+                    "平台投递写入成功 article_id=%s platform=%s status=%s",
+                    article_id,
+                    platform,
+                    res.status,
+                )
             except Exception:
                 trans.rollback()  # 回滚事务
+                LOGGER.exception(  # 记录回滚原因
+                    "平台投递写入失败 article_id=%s platform=%s",
+                    article_id,
+                    platform,
+                )
                 raise  # 继续抛出异常
             results[platform] = res  # 记录结果
         except Exception as exc:  # 捕获适配器异常
             attempts_now = attempts_so_far + 1  # 累加次数
             wait_seconds = _next_backoff(base_seconds, attempts_now)  # 计算退避
             next_retry = now + timedelta(seconds=wait_seconds)  # 计算下次时间
+            LOGGER.error(  # 记录投递失败信息
+                "平台投递异常 article_id=%s platform=%s attempts=%s error=%s",
+                article_id,
+                platform,
+                attempts_now,
+                str(exc),
+            )
             trans = db.begin_nested() if db.in_transaction() else db.begin()  # 兼容已有事务的开启方式
             try:
                 if log is None:
@@ -225,7 +279,8 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                             attempt_count,
                             last_error,
                             next_retry_at,
-                            payload
+                            payload,
+                            created_at
                         )
                         VALUES (
                             :aid,
@@ -238,7 +293,8 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                             :ac,
                             :err,
                             :nra,
-                            :pl
+                            :pl,
+                            :created_at
                         )
                         """
                     )  # 失败插入
@@ -251,6 +307,7 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                             "ac": attempts_now,
                             "nra": next_retry,
                             "pl": json.dumps({}, ensure_ascii=False),
+                            "created_at": now.isoformat(),
                         },
                     )  # 执行插入
                 else:
@@ -276,8 +333,19 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                         },
                     )  # 执行更新
                 trans.commit()  # 提交失败写入
+                LOGGER.info(  # 记录失败信息已落库
+                    "平台失败信息已记录 article_id=%s platform=%s next_retry_at=%s",
+                    article_id,
+                    platform,
+                    next_retry.isoformat(),
+                )
             except Exception:
                 trans.rollback()  # 回滚事务
+                LOGGER.exception(  # 记录失败记录写入异常
+                    "平台失败写入失败 article_id=%s platform=%s",
+                    article_id,
+                    platform,
+                )
                 raise  # 抛出异常
             results[platform] = DeliveryResult(  # 返回失败结果
                 platform=platform,
@@ -287,4 +355,7 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                 payload=None,
                 error=str(exc),
             )
+    LOGGER.info("文章投递流程结束 article_id=%s", article_id)  # 记录整体结束
     return results  # 返回所有平台结果
+
+LOGGER = get_logger(__name__)  # 获取模块专用记录器

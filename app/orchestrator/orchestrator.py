@@ -16,6 +16,9 @@ from app.db.migrate import SessionLocal  # 获取 Session 工厂
 from app.orchestrator import parsers, ssh_runner, vps_job_packager  # 引入 orchestrator 子模块
 from app.generator.article_generator import lease_theme_for_run, release_theme_lock  # TODO: 导入软锁操作
 from app.generator.persistence import insert_article_tx  # 新增导入用于执行去重与事务落库
+from app.utils.logger import get_logger  # 引入统一日志模块
+
+LOGGER = get_logger(__name__)  # 初始化模块日志记录器
 
 
 def _update_run(db: Session, run_id: str, status: str, error: str | None = None) -> None:
@@ -23,6 +26,7 @@ def _update_run(db: Session, run_id: str, status: str, error: str | None = None)
 
     now = datetime.utcnow()  # 新增: 获取当前 UTC 时间
     run_date = now.date()  # 新增: 取当日日期
+    LOGGER.info("更新运行状态 run_id=%s status=%s", run_id, status)  # 新增: 记录状态更新意图
     trans = db.begin()  # 新增: 开启事务
     try:
         db.execute(  # 新增: 执行 UPSERT 语句
@@ -39,8 +43,10 @@ def _update_run(db: Session, run_id: str, status: str, error: str | None = None)
             {"run_id": run_id, "run_date": run_date, "status": status, "error": error, "now": now},
         )
         trans.commit()  # 新增: 提交事务
-    except Exception:
+        LOGGER.info("运行状态写入成功 run_id=%s status=%s", run_id, status)  # 新增: 记录事务提交
+    except Exception as exc:  # 新增: 捕获异常以记录日志
         trans.rollback()  # 新增: 出错回滚
+        LOGGER.exception("运行状态写入失败 run_id=%s status=%s error=%s", run_id, status, str(exc))  # 新增: 记录异常详情
         raise  # 新增: 向上抛出异常
 
 
@@ -158,8 +164,9 @@ def orchestrate_once(settings, db: Session, run_id: str) -> None:  # 定义 orch
 
     _update_run(db, run_id, "scheduled")  # 新增: 记录调度开始
     theme = lease_theme_for_run(db, run_id=run_id)  # 领取一条待生成的主题并打上软锁
+    LOGGER.info("领取主题结果 run_id=%s has_theme=%s", run_id, bool(theme))  # 记录主题领取情况
     if not theme:  # 判断是否成功领取主题
-        print("⚠️ 无可用主题")  # 记录提示信息
+        LOGGER.warning("无可用主题，结束本次运行 run_id=%s", run_id)  # 记录提示信息
         _update_run(db, run_id, "skipped")  # 新增: 无任务直接跳过
         return  # 无主题时直接返回
 
@@ -178,11 +185,12 @@ def orchestrate_once(settings, db: Session, run_id: str) -> None:  # 定义 orch
             run_id=run_id,  # 传入当前运行标识
         )
         article_id = result["article_id"]  # 获取新写入文章的 ID
-        print(f"✅ 写入文章 ID={article_id}")  # 输出成功日志
+        LOGGER.info("文章写入成功 run_id=%s article_id=%s", run_id, article_id)  # 记录落库结果
         _update_run(db, run_id, "prepared")  # 新增: 更新状态为已准备
         _update_run(db, run_id, "delivering")  # 新增: 更新状态为投递中
         delivery_results = deliver_article_to_all(db, settings, article_id=article_id)  # 新增: 触发平台分发
         statuses = {platform: res.status for platform, res in delivery_results.items()}  # 新增: 收集状态
+        LOGGER.info("平台投递结果 run_id=%s article_id=%s statuses=%s", run_id, article_id, statuses)  # 记录平台返回
         if not delivery_results:  # 新增: 无启用平台视为成功
             _update_run(db, run_id, "success")  # 新增: 直接标记成功
         elif all(status in {"prepared", "success", "skipped"} for status in statuses.values()):  # 新增: 判断成功
@@ -208,7 +216,7 @@ def orchestrate_once(settings, db: Session, run_id: str) -> None:  # 定义 orch
         else:
             _update_run(db, run_id, "partial", error=str(statuses))  # 新增: 其他状态视为部分完成
     except Exception as exc:  # noqa: BLE001  # 捕获所有异常以便回滚软锁
-        print(f"❌ 生成或落库失败: {exc}")  # 打印失败原因
+        LOGGER.exception("生成或落库失败 run_id=%s error=%s", run_id, str(exc))  # 记录异常详情
         release_theme_lock(db, theme_id=theme["id"])  # 释放主题软锁避免题目被吃掉
         _update_run(db, run_id, "failed", error=str(exc))  # 新增: 记录失败状态
         raise  # 将异常继续抛出交由上层处理

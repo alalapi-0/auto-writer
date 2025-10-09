@@ -7,6 +7,10 @@ import json  # 读写 JSON 文件
 from pathlib import Path  # 处理文件路径
 from typing import Dict, List  # 类型标注
 
+from app.utils.logger import get_logger  # 引入统一日志模块
+
+LOGGER = get_logger(__name__)  # 初始化模块日志记录器
+
 
 def _load_job(path: Path) -> dict:
     """读取 job.json 文件。"""
@@ -62,6 +66,7 @@ def main() -> None:
     output_path = Path(args.output)  # 输出路径
     log_path = Path(args.log)  # 日志路径
 
+    LOGGER.info("远程 worker 启动 job=%s env=%s", str(job_path), str(env_path))  # 记录启动信息
     job_data = _load_job(job_path)  # 读取 job.json
     runtime_env = _load_env(env_path)  # 读取 .env.runtime
 
@@ -69,12 +74,24 @@ def main() -> None:
     overall_success = True  # 新增: 聚合成功标记
     error_messages: List[str] = []  # 新增: 收集错误信息
     for topic in job_data.get("topics", []):  # 遍历任务
+        LOGGER.info(  # 记录主题处理开始
+            "处理主题 character=%s work=%s keyword=%s",
+            topic.get("character_name"),
+            topic.get("work"),
+            topic.get("keyword"),
+        )
         content = _render_article(topic, job_data.get("template_options", {}))  # 渲染正文
         platform_results = []  # 平台结果列表
         for platform, enabled in job_data.get("delivery_targets", {}).items():  # 遍历交付目标
             if not enabled:  # 若未开启
                 continue  # 跳过
             result = _deliver(platform, runtime_env)  # 新增: 调用投递模拟
+            LOGGER.info(  # 记录平台投递结果
+                "平台处理结果 platform=%s ok=%s error=%s",
+                platform,
+                result.get("ok"),
+                result.get("error"),
+            )
             if not result.get("ok"):  # 新增: 检测失败
                 overall_success = False  # 新增: 标记整体失败
                 error_messages.append(f"{platform}:{result.get('error')}")  # 新增: 记录错误
@@ -96,16 +113,21 @@ def main() -> None:
         "articles": articles_result,
         "errors": error_messages,  # 新增: 返回错误列表
     }  # 构造 result.json
+    output_path.parent.mkdir(parents=True, exist_ok=True)  # 确保结果目录存在
     output_path.write_text(json.dumps(result_payload, ensure_ascii=False, indent=2), encoding="utf-8")  # 写入 result.json
+    log_path.parent.mkdir(parents=True, exist_ok=True)  # 确保日志目录存在
     log_lines = [
         "[remote_worker] start",
         f"topics={len(job_data.get('topics', []))}",
+        f"success={overall_success}",
         "[remote_worker] finish",
     ]  # 构造日志内容
     log_path.write_text("\n".join(log_lines), encoding="utf-8")  # 写入日志
+    LOGGER.info("远程 worker 完成 output=%s success=%s", str(output_path), overall_success)  # 记录完成信息
 
     if env_path.exists():  # 任务完成后删除 .env.runtime
         env_path.unlink()  # 删除文件
+        LOGGER.info("清理 runtime 环境文件 path=%s", str(env_path))  # 记录清理动作
 
 
 if __name__ == "__main__":  # 脚本入口
