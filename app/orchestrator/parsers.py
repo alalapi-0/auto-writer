@@ -50,9 +50,14 @@ def persist_results(session: Session, run: models.Run, result: dict) -> List[str
             log = models.PlatformLog(
                 article_id=draft.id,
                 platform=platform_result.get("platform", "unknown"),
+                target_id=platform_result.get("id_or_url"),  # 新增: 记录平台草稿 ID
+                status="success" if platform_result.get("ok") else "failed",  # 新增: 同步状态字段
                 ok=bool(platform_result.get("ok", False)),
                 id_or_url=platform_result.get("id_or_url"),
                 error=platform_result.get("error"),
+                attempt_count=1,  # 新增: 默认首轮尝试次数
+                last_error=platform_result.get("error"),  # 新增: 同步最近错误
+                payload=platform_result,  # 新增: 存档原始返回数据
             )
             session.add(log)  # 写入平台日志
 

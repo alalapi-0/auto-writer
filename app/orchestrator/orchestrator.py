@@ -11,10 +11,37 @@ from sqlalchemy.orm import Session  # SQLAlchemy 会话类型
 
 from config.settings import settings  # 导入全局配置
 from app.db import models  # 导入 ORM 模型
+from app.delivery.dispatcher import deliver_article_to_all  # 新增: 引入平台分发器
 from app.db.migrate import SessionLocal  # 获取 Session 工厂
 from app.orchestrator import parsers, ssh_runner, vps_job_packager  # 引入 orchestrator 子模块
 from app.generator.article_generator import lease_theme_for_run, release_theme_lock  # TODO: 导入软锁操作
 from app.generator.persistence import insert_article_tx  # 新增导入用于执行去重与事务落库
+
+
+def _update_run(db: Session, run_id: str, status: str, error: str | None = None) -> None:
+    """将运行状态写入 runs 表，若不存在则创建。"""  # 新增: 函数中文文档
+
+    now = datetime.utcnow()  # 新增: 获取当前 UTC 时间
+    run_date = now.date()  # 新增: 取当日日期
+    trans = db.begin()  # 新增: 开启事务
+    try:
+        db.execute(  # 新增: 执行 UPSERT 语句
+            text(
+                """
+                INSERT INTO runs (run_id, run_date, planned_articles, status, error, created_at, updated_at)
+                VALUES (:run_id, :run_date, 0, :status, :error, :now, :now)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    status = excluded.status,
+                    error = excluded.error,
+                    updated_at = excluded.updated_at
+                """
+            ),
+            {"run_id": run_id, "run_date": run_date, "status": status, "error": error, "now": now},
+        )
+        trans.commit()  # 新增: 提交事务
+    except Exception:
+        trans.rollback()  # 新增: 出错回滚
+        raise  # 新增: 向上抛出异常
 
 
 def _split_traits(traits: str) -> List[str]:
@@ -129,12 +156,15 @@ def finalize_theme_used(db: Session, theme_id: int, run_id: str) -> None:
 def orchestrate_once(settings, db: Session, run_id: str) -> None:  # 定义 orchestrator 单次执行入口
     """基于软锁的单次 orchestrator 执行入口，串起领取主题与去重落库流程。"""  # 函数中文说明
 
+    _update_run(db, run_id, "scheduled")  # 新增: 记录调度开始
     theme = lease_theme_for_run(db, run_id=run_id)  # 领取一条待生成的主题并打上软锁
     if not theme:  # 判断是否成功领取主题
         print("⚠️ 无可用主题")  # 记录提示信息
+        _update_run(db, run_id, "skipped")  # 新增: 无任务直接跳过
         return  # 无主题时直接返回
 
     try:
+        _update_run(db, run_id, "generating")  # 新增: 更新状态为生成中
         title = theme.get("psychology_definition") or f"{theme.get('psychology_keyword', '')} 心理解析"  # 使用主题定义或构造标题
         body = f"占位正文：角色={theme.get('character_name','')}, 作品={theme.get('show_name','')}, 关键词={theme.get('psychology_keyword','')}"  # 构造占位正文确保流程连通
         result = insert_article_tx(  # 调用去重与事务落库逻辑
@@ -149,9 +179,38 @@ def orchestrate_once(settings, db: Session, run_id: str) -> None:  # 定义 orch
         )
         article_id = result["article_id"]  # 获取新写入文章的 ID
         print(f"✅ 写入文章 ID={article_id}")  # 输出成功日志
+        _update_run(db, run_id, "prepared")  # 新增: 更新状态为已准备
+        _update_run(db, run_id, "delivering")  # 新增: 更新状态为投递中
+        delivery_results = deliver_article_to_all(db, settings, article_id=article_id)  # 新增: 触发平台分发
+        statuses = {platform: res.status for platform, res in delivery_results.items()}  # 新增: 收集状态
+        if not delivery_results:  # 新增: 无启用平台视为成功
+            _update_run(db, run_id, "success")  # 新增: 直接标记成功
+        elif all(status in {"prepared", "success", "skipped"} for status in statuses.values()):  # 新增: 判断成功
+            _update_run(db, run_id, "success")  # 新增: 标记运行成功
+        elif any(status == "failed" for status in statuses.values()):  # 新增: 存在失败时处理
+            max_attempts = settings.retry_max_attempts  # 新增: 读取配置上限
+            attempt_rows = db.execute(  # 新增: 查询当前尝试次数
+                text(
+                    """
+                    SELECT platform, attempt_count
+                    FROM platform_logs
+                    WHERE article_id = :aid
+                    """
+                ),
+                {"aid": article_id},
+            ).mappings().all()
+            attempt_map = {row["platform"]: int(row["attempt_count"] or 0) for row in attempt_rows}  # 新增: 构造映射
+            failed_platforms = [p for p, s in statuses.items() if s == "failed"]  # 新增: 提取失败平台
+            if failed_platforms and all(attempt_map.get(p, 0) >= max_attempts for p in failed_platforms):  # 新增: 判断是否超过上限
+                _update_run(db, run_id, "failed", error=str(statuses))  # 新增: 标记彻底失败
+            else:
+                _update_run(db, run_id, "partial", error=str(statuses))  # 新增: 标记部分完成
+        else:
+            _update_run(db, run_id, "partial", error=str(statuses))  # 新增: 其他状态视为部分完成
     except Exception as exc:  # noqa: BLE001  # 捕获所有异常以便回滚软锁
         print(f"❌ 生成或落库失败: {exc}")  # 打印失败原因
         release_theme_lock(db, theme_id=theme["id"])  # 释放主题软锁避免题目被吃掉
+        _update_run(db, run_id, "failed", error=str(exc))  # 新增: 记录失败状态
         raise  # 将异常继续抛出交由上层处理
 
 

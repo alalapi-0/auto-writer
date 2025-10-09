@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS runs (
     status VARCHAR(32) NOT NULL DEFAULT 'pending',
     metadata_path VARCHAR(255),
     result_path VARCHAR(255),
+    error TEXT, -- 新增: 记录错误信息便于追踪
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, -- 新增: 更新时间戳
     CONSTRAINT uq_run_run_id UNIQUE (run_id)
 );
 
@@ -59,11 +61,18 @@ CREATE TABLE IF NOT EXISTS platform_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
     platform VARCHAR(64) NOT NULL,
+    target_id TEXT, -- 新增: 平台返回的草稿 ID
+    status TEXT DEFAULT 'pending', -- 新增: 统一状态字段
     ok BOOLEAN NOT NULL DEFAULT 0,
     id_or_url VARCHAR(255),
     error TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0, -- 新增: 记录尝试次数
+    last_error TEXT, -- 新增: 保存最近一次错误
+    next_retry_at TIMESTAMP, -- 新增: 预约下次重试时间
+    payload JSON, -- 新增: 序列化存档
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS ix_platform_logs_next_retry ON platform_logs(next_retry_at); -- 新增: 便于扫描到期任务
 
 CREATE TABLE IF NOT EXISTS used_pairs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

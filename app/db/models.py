@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    JSON,  # 新增: 引入 JSON 类型存储 payload
     String,
     Text,
     UniqueConstraint,
@@ -100,9 +101,13 @@ class Run(Base):
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)  # 状态字段
     metadata_path: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 记录 job.json 路径
     result_path: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 记录 result.json 路径
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)  # 新增: 运行错误信息
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )  # 创建时间
+    updated_at: Mapped[datetime] = mapped_column(  # 新增: 更新时间字段
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
     articles: Mapped[list["ArticleDraft"]] = relationship(
         back_populates="run", cascade="all, delete-orphan"
@@ -142,9 +147,15 @@ class PlatformLog(Base):
         ForeignKey("articles.id"), nullable=False
     )  # 关联文章草稿
     platform: Mapped[str] = mapped_column(String(64), nullable=False)  # 平台名称
+    target_id: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 新增: 平台返回的草稿 ID
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)  # 新增: 投递状态
     ok: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # 是否成功
     id_or_url: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 返回的草稿 id 或链接
     error: Mapped[str | None] = mapped_column(Text, nullable=True)  # 错误信息
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 新增: 尝试次数
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)  # 新增: 最近一次错误描述
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 新增: 下次重试时间
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # 新增: 存档投递材料
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )  # 记录时间
