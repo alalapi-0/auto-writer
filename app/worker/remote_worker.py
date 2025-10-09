@@ -66,13 +66,19 @@ def main() -> None:
     runtime_env = _load_env(env_path)  # 读取 .env.runtime
 
     articles_result: List[dict] = []  # 准备结果列表
+    overall_success = True  # 新增: 聚合成功标记
+    error_messages: List[str] = []  # 新增: 收集错误信息
     for topic in job_data.get("topics", []):  # 遍历任务
         content = _render_article(topic, job_data.get("template_options", {}))  # 渲染正文
         platform_results = []  # 平台结果列表
         for platform, enabled in job_data.get("delivery_targets", {}).items():  # 遍历交付目标
             if not enabled:  # 若未开启
                 continue  # 跳过
-            platform_results.append(_deliver(platform, runtime_env))  # 模拟投递
+            result = _deliver(platform, runtime_env)  # 新增: 调用投递模拟
+            if not result.get("ok"):  # 新增: 检测失败
+                overall_success = False  # 新增: 标记整体失败
+                error_messages.append(f"{platform}:{result.get('error')}")  # 新增: 记录错误
+            platform_results.append(result)  # 新增: 收录结果
         articles_result.append(
             {
                 "character_name": topic["character_name"],
@@ -86,9 +92,9 @@ def main() -> None:
 
     result_payload = {
         "run_id": job_data.get("run_id", ""),
-        "success": True,
+        "success": overall_success,  # 新增: 根据聚合结果返回
         "articles": articles_result,
-        "errors": [],
+        "errors": error_messages,  # 新增: 返回错误列表
     }  # 构造 result.json
     output_path.write_text(json.dumps(result_payload, ensure_ascii=False, indent=2), encoding="utf-8")  # 写入 result.json
     log_lines = [

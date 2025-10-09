@@ -1,6 +1,7 @@
 """去重逻辑自检脚本，用于快速验证强约束与近似约束是否生效。"""  # 模块中文说明
 from __future__ import annotations  # 引入未来注解语法保证类型提示兼容
 from sqlalchemy.orm import Session  # 导入 SQLAlchemy 会话类型
+from config.settings import settings  # 新增: 导入全局配置以打印关键项
 from app.db.migrate import SessionLocal  # 导入数据库会话工厂
 from app.generator.persistence import insert_article_tx  # 导入事务写入函数
 
@@ -12,6 +13,11 @@ def get_db() -> Session:  # 定义会话获取函数
 
 def main() -> None:  # 定义脚本主函数
     """执行三种场景的去重验证并输出结果。"""  # 函数中文文档
+    print("== 配置巡检 ==")  # 新增: 输出配置巡检标题
+    print(f"DELIVERY_ENABLED_PLATFORMS={settings.delivery_enabled_platforms}")  # 新增: 显示启用平台
+    print(f"OUTBOX_DIR={settings.outbox_dir}")  # 新增: 显示草稿目录
+    print(f"RETRY_BASE_SECONDS={settings.retry_base_seconds}")  # 新增: 显示重试基础秒数
+    print(f"RETRY_MAX_ATTEMPTS={settings.retry_max_attempts}")  # 新增: 显示最大重试次数
     db = get_db()  # 创建数据库会话
     try:
         print("== 场景 A: 首次入库，预期成功 ==")  # 输出场景说明

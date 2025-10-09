@@ -20,6 +20,33 @@ if ENV_PATH.exists():  # TODO: 若存在 .env 文件则加载，兼容原有流�
     load_dotenv(ENV_PATH)  # TODO: 使用 python-dotenv 读取配置，支持本地开发
 
 
+def _parse_platform_list(raw: str | None, default: List[str]) -> List[str]:  # 新增: 解析平台列表
+    """将逗号分隔的环境变量解析为平台列表，移除空白项。"""  # 新增: 函数中文文档
+
+    if not raw:  # 新增: 若环境变量为空则返回默认值
+        return list(default)  # 新增: 返回默认列表副本
+    items = [item.strip() for item in raw.split(",")]  # 新增: 按逗号拆分并去除空白
+    return [item for item in items if item]  # 新增: 过滤空字符串
+
+
+def _parse_int(raw: str | None, default: int) -> int:  # 新增: 安全解析整数
+    """将环境变量解析为整数，失败时回退默认值。"""  # 新增: 函数中文文档
+
+    try:  # 新增: 捕获非法输入
+        return int(raw) if raw is not None else default  # 新增: 返回转换结果或默认值
+    except ValueError:  # 新增: 捕获转换异常
+        return default  # 新增: 回退到默认值
+
+
+DELIVERY_ENABLED_PLATFORMS = _parse_platform_list(  # 新增: 定义平台开关默认值
+    os.getenv("DELIVERY_ENABLED_PLATFORMS"),  # 新增: 读取环境变量覆盖
+    ["wechat_mp", "zhihu"],  # 新增: 默认启用公众号与知乎
+)  # 新增: 结束平台列表定义
+OUTBOX_DIR = os.getenv("OUTBOX_DIR", "./outbox")  # 新增: 定义草稿产出目录
+RETRY_BASE_SECONDS = _parse_int(os.getenv("RETRY_BASE_SECONDS"), 300)  # 新增: 定义重试基础秒数
+RETRY_MAX_ATTEMPTS = _parse_int(os.getenv("RETRY_MAX_ATTEMPTS"), 5)  # 新增: 定义最大重试次数
+
+
 class ConfigError(Exception):
     """配置/凭据不合法时抛出该异常，并附带可读信息。"""
 
@@ -112,6 +139,12 @@ class Settings:
 
     # === 主题生命周期参数 ===
     lock_expire_minutes: int = 90  # TODO: 软锁超时时长，单位分钟
+    delivery_enabled_platforms: List[str] = field(  # 新增: 平台开关列表字段
+        default_factory=list  # 新增: 默认使用空列表占位
+    )
+    outbox_dir: str = "./outbox"  # 新增: 草稿输出目录默认值
+    retry_base_seconds: int = 300  # 新增: 重试基础秒数默认值
+    retry_max_attempts: int = 5  # 新增: 最大重试次数默认值
 
     # === 保持原有字段 ===
     database: DatabaseConfig = field(
@@ -272,6 +305,10 @@ def get_settings() -> Settings:
         wp_url=os.getenv("WP_URL"),
         wp_user=os.getenv("WP_USER"),
         wp_app_pass=os.getenv("WP_APP_PASS"),
+        delivery_enabled_platforms=list(DELIVERY_ENABLED_PLATFORMS),  # 新增: 注入平台开关配置
+        outbox_dir=OUTBOX_DIR,  # 新增: 注入 outbox 目录
+        retry_base_seconds=RETRY_BASE_SECONDS,  # 新增: 注入重试基础秒数
+        retry_max_attempts=RETRY_MAX_ATTEMPTS,  # 新增: 注入最大重试次数
     )
 
     return settings_obj

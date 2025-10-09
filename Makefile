@@ -1,4 +1,4 @@
-.PHONY: init run lint test run-local-orchestrator
+.PHONY: init run lint test run-local-orchestrator deliver retry-due  # 新增: 声明新目标
 
 init:
         # 初始化依赖：优先使用 poetry，若失败则回退到 pip
@@ -13,6 +13,14 @@ run:
 run-local-orchestrator:
         # 本机 orchestrator 一次性执行，可通过 DATE 与 ARTICLES 覆盖
         python app/orchestrator/orchestrator.py $(if $(DATE),--date $(DATE),) $(if $(ARTICLES),--articles $(ARTICLES),)
+
+deliver:
+        # 手动触发分发流程，可通过 ARTICLE_ID 精确定位
+        python scripts/deliver_once.py $(if $(ARTICLE_ID),--article-id $(ARTICLE_ID),)
+
+retry-due:
+        # 扫描 platform_logs 重试窗口并重新分发
+        python scripts/retry_due.py
 
 lint:
         # 先执行静态检查，再以 check 模式验证格式
