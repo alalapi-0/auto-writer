@@ -3,16 +3,17 @@
 from __future__ import annotations  # 启用未来注解语法
 
 import argparse  # 解析命令行参数
-from datetime import date, datetime, timedelta  # 处理日期与时间
+from datetime import date, datetime, timedelta, timezone  # TODO: 增加 timezone 以便软锁记录
 from typing import List  # 类型别名
 
-from sqlalchemy import or_, select  # 构造查询条件
+from sqlalchemy import or_, select, text  # 构造查询条件与手写 SQL
 from sqlalchemy.orm import Session  # SQLAlchemy 会话类型
 
 from config.settings import settings  # 导入全局配置
 from app.db import models  # 导入 ORM 模型
 from app.db.migrate import SessionLocal  # 获取 Session 工厂
 from app.orchestrator import parsers, ssh_runner, vps_job_packager  # 引入 orchestrator 子模块
+from app.generator.article_generator import lease_theme_for_run, release_theme_lock  # TODO: 导入软锁操作
 
 
 def _split_traits(traits: str) -> List[str]:
@@ -103,6 +104,47 @@ def preflight_scan(session: Session, topics: List[dict], run_date: date) -> List
     return deduped  # 返回去重结果
 
 
+def finalize_theme_used(db: Session, theme_id: int, run_id: str) -> None:
+    """所有投递成功后，最终落地 used 标记。"""
+
+    now = datetime.now(timezone.utc)  # TODO: 使用 UTC 记录使用时间
+    db.execute(
+        text(
+            """
+            UPDATE psychology_themes
+            SET used = 1,
+                used_at = :used_at,
+                used_by_run_id = :run_id,
+                locked_by_run_id = NULL,
+                locked_at = NULL
+            WHERE id = :theme_id
+            """
+        ),
+        {"used_at": now.isoformat(), "run_id": run_id, "theme_id": theme_id},
+    )
+    db.commit()
+
+
+def orchestrate_once(settings, db: Session, run_id: str) -> None:
+    """基于软锁的单次 orchestrator 执行入口。"""
+
+    theme = lease_theme_for_run(db, run_id=run_id)
+    if not theme:
+        # TODO: 打印无可用主题
+        return
+
+    try:
+        # TODO: 调用真实投递逻辑
+        ok = True
+        if ok:
+            finalize_theme_used(db, theme_id=theme["id"], run_id=run_id)
+        else:
+            release_theme_lock(db, theme_id=theme["id"])
+    except Exception:  # noqa: BLE001
+        release_theme_lock(db, theme_id=theme["id"])
+        raise
+
+
 def build_job_payload(run_id: str, run_date: date, topics: List[dict]) -> dict:
     """组装 job.json 所需的基础数据结构。"""
 
@@ -142,7 +184,7 @@ def orchestrate(run_date: date, target_articles: int | None = None) -> dict:
             session.commit()  # 持久化状态
             return {"run_id": run_id, "topics": []}  # 直接返回
         payload = build_job_payload(run_id, run_date, topics)  # 组装 payload
-        job_path, env_runtime_path = vps_job_packager.pack_job_and_env(
+        job_path, temp_dir, env_runtime_path = vps_job_packager.pack_job_and_env(
             settings,
             payload["run_id"],
             payload["run_date"],
@@ -186,6 +228,7 @@ def orchestrate(run_date: date, target_articles: int | None = None) -> dict:
         else:
             run_record.status = "scheduled"  # 若未执行远程则标记为已规划
             session.commit()  # 提交状态
+        ssh_runner.run_remote_job(temp_dir=temp_dir, env_file=env_runtime_path, command=["echo", "noop"])  # TODO: 占位调用以触发清理
         return result_summary  # 返回 orchestrator 结果
 
 

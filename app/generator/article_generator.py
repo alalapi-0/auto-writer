@@ -5,15 +5,15 @@ from __future__ import annotations  # 引入未来注解特性以支持前向引
 import json  # 读取风格配置文件
 import random  # 提供随机选择心理特质的能力
 from collections.abc import Mapping, Sequence  # 处理嵌套风格指令
-from typing import Any, Dict  # 描述文章返回结构
+from datetime import datetime, timedelta, timezone  # TODO: 支持软锁过期计算
+from typing import Any, Dict, Optional  # 描述文章返回结构
 
 import structlog  # 结构化日志记录器，便于追踪生成状态
-from sqlalchemy import select  # 查询数据库以获取心理学主题
+from sqlalchemy import text  # TODO: 引入 text 以执行原生 SQL
 from sqlalchemy.orm import Session  # 类型提示，便于静态检查
 
-from config.settings import BASE_DIR  # 提供项目根目录路径以定位模板文件
+from config.settings import BASE_DIR, settings  # TODO: 引入 settings 读取软锁配置
 from app.db.migrate import SessionLocal  # 数据库会话工厂
-from app.db.models import PsychologyTheme  # 心理学主题模型
 from app.generator import character_selector  # 角色选择工具模块
 
 LOGGER = structlog.get_logger()  # 初始化日志器
@@ -21,6 +21,89 @@ ARTICLE_PROMPT_PATH = (  # 心理学影评提示词模板路径
     BASE_DIR / "app" / "generator" / "prompts" / "article_prompt_template.txt"
 )  # 通过路径拼装定位模板
 STYLE_PROFILE_PATH = BASE_DIR / "app" / "generator" / "style_profile.json"  # 风格配置文件路径
+
+
+def lease_theme_for_run(db: Session, run_id: str) -> Optional[dict]:
+    """从主题库领取一个可用主题，但仅做软锁，不标记 used。"""
+
+    now = datetime.now(timezone.utc)  # TODO: 获取当前 UTC 时间
+    expire_at = now - timedelta(minutes=settings.lock_expire_minutes)  # TODO: 计算软锁过期阈值
+    try:
+        row = (
+            db.execute(
+                text(
+                    """
+                    SELECT id, psychology_keyword, psychology_definition, character_name, show_name,
+                           locked_by_run_id, locked_at, used
+                    FROM psychology_themes
+                    WHERE (used IS NULL OR used = 0)
+                      AND (locked_by_run_id IS NULL OR locked_at < :expire)
+                    ORDER BY id
+                    LIMIT 1
+                    """
+                ),
+                {"expire": expire_at.isoformat()},
+            )
+            .mappings()
+            .first()
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("TODO: 无法从数据库领取主题，请确认 psychology_themes 表存在且结构正确。") from exc
+
+    if row is None:
+        return None
+
+    db.execute(
+        text(
+            """
+            UPDATE psychology_themes
+            SET locked_by_run_id = :run_id,
+                locked_at = :now
+            WHERE id = :theme_id
+            """
+        ),
+        {"run_id": run_id, "now": now.isoformat(), "theme_id": row["id"]},
+    )
+    db.commit()
+
+    result = dict(row)
+    result["locked_by_run_id"] = run_id
+    result["locked_at"] = now
+    return result
+
+
+def release_theme_lock(db: Session, theme_id: int) -> None:
+    """在失败或放弃时释放软锁。"""
+
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE psychology_themes
+                SET locked_by_run_id = NULL,
+                    locked_at = NULL
+                WHERE id = :theme_id
+                """
+            ),
+            {"theme_id": theme_id},
+        )
+        db.commit()
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("TODO: 释放主题软锁失败，请检查数据库权限与结构。") from exc
+
+
+def _load_theme_detail(db: Session, theme_id: int) -> Optional[dict]:
+    """辅助函数：重新读取主题详情，确保字段齐全。"""
+
+    stmt = text(
+        """
+        SELECT id, psychology_keyword, psychology_definition, character_name, show_name
+        FROM psychology_themes
+        WHERE id = :theme_id
+        """
+    )
+    row = db.execute(stmt, {"theme_id": theme_id}).mappings().first()
+    return dict(row) if row else None
 
 
 class ArticleGenerator:
@@ -93,32 +176,24 @@ class ArticleGenerator:
         _walk(style_profile, "STYLE")
         return flattened
 
-    def _acquire_theme(self) -> PsychologyTheme:
-        """获取一条未使用的心理学主题记录并标记为已使用。"""
+    def _acquire_theme(self) -> dict:
+        """获取一条未使用的心理学主题记录并仅做软锁。"""
 
-        with self._get_session() as session:  # 使用上下文管理器确保会话释放
-            stmt = (  # 构造查询语句，获取未使用的主题
-                select(PsychologyTheme)
-                .where(PsychologyTheme.used.is_(False))
-                .order_by(PsychologyTheme.id)
-                .limit(1)
-            )
-            theme = session.execute(stmt).scalar_one_or_none()  # 执行查询获取主题
-            if theme is None:  # 若没有可用主题则记录错误并抛出异常
+        run_id = "article-generator-local"  # TODO: 本地生成器固定软锁 ID
+        with self._get_session() as session:
+            leased = lease_theme_for_run(session, run_id)
+            if leased is None:
                 LOGGER.error("no_available_theme")
                 raise RuntimeError("没有可用的心理学影评主题，请补充数据库种子数据。")
-            theme.used = True  # 标记主题已被使用
-            session.add(theme)  # 将修改写入会话
-            session.commit()  # 提交事务持久化状态
-            session.refresh(theme)  # 刷新实例以确保属性更新
-            LOGGER.debug(  # 记录成功获取主题的调试信息
-                "theme_acquired",
-                theme_id=theme.id,
-                keyword=theme.psychology_keyword,
-                character=theme.character_name,
-                show=theme.show_name,
+            detail = _load_theme_detail(session, leased["id"]) or leased
+            LOGGER.debug(
+                "theme_leased",
+                theme_id=detail.get("id"),
+                keyword=detail.get("psychology_keyword"),
+                character=detail.get("character_name"),
+                show=detail.get("show_name"),
             )
-            return theme  # 返回主题对象供后续使用
+            return detail
 
     def generate_article(self, topic: str, style_key: str = "psychology_analysis") -> Dict[str, str]:
         """根据主题生成文章草稿。"""
@@ -130,8 +205,8 @@ class ArticleGenerator:
         style_profile = self._get_style_profile(style_key)  # 读取指定风格配置
         style_replacements = self._flatten_style_directives(style_profile)  # 展开风格指令
         replacements = {  # 构造模板占位符与实际内容的映射
-            "{{心理学关键词}}": theme.psychology_keyword,
-            "{{心理学定义}}": theme.psychology_definition,
+            "{{心理学关键词}}": theme.get("psychology_keyword", "未知关键词"),
+            "{{心理学定义}}": theme.get("psychology_definition", "未知定义"),
             "{{角色名}}": character_profile["name"],
             "{{影视剧名}}": character_profile["work"],
             "{{角色心理特质}}": chosen_trait,
@@ -145,25 +220,30 @@ class ArticleGenerator:
             "article_generated",
             topic=topic,
             content_length=len(article_body),
-            theme_id=theme.id,
+            theme_id=theme.get("id"),
         )
         title = (  # 构造模拟文章标题
-            f"{theme.psychology_keyword}是一种{theme.psychology_definition} —— "
+            f"{theme.get('psychology_keyword', '心理学主题')}是一种{theme.get('psychology_definition', '概念')} —— "
             f"{character_profile['name']}（{character_profile['work']}）"
         )
-        return {
+        result = {
             "title": title,  # 模拟生成文章标题
             "content": article_body,  # 模拟生成文章正文
             "keywords": [
-                theme.psychology_keyword,
+                theme.get("psychology_keyword", "心理学主题"),
                 character_profile["name"],
                 character_profile["work"],
             ],  # 根据主题构造关键词列表
             "theme": {
-                "id": theme.id,
+                "id": theme.get("id"),
                 "topic": topic,
                 "character": character_profile["name"],
                 "show": character_profile["work"],
-                "definition": theme.psychology_definition,
+                "definition": theme.get("psychology_definition"),
             },
         }
+
+        with self._get_session() as session:
+            release_theme_lock(session, theme_id=theme["id"])  # TODO: 本地生成后主动释放软锁
+
+        return result

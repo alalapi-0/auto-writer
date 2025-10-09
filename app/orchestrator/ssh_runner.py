@@ -2,6 +2,7 @@
 
 from __future__ import annotations  # 启用未来注解语法
 
+import os  # TODO: 继承并更新当前环境变量
 import shutil  # 复制文件到临时目录
 import subprocess  # 启动子进程模拟远程执行
 import sys  # 获取当前 Python 解释器
@@ -63,3 +64,22 @@ class SSHRunner:
 
         if self.remote_env_path.exists():  # 若文件存在
             self.remote_env_path.unlink()  # 删除文件
+
+
+def run_remote_job(temp_dir: Path, env_file: Path, command: list[str]) -> int:
+    """使用生成的 env_file 与 command 运行远程作业（或本地模拟）。"""
+
+    try:
+        env: dict[str, str] = {}  # TODO: 收集凭据键值
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            if not line.strip():  # TODO: 跳过空行
+                continue
+            key, value = line.split("=", 1)
+            env[key] = value
+        full_env = dict(os.environ)  # TODO: 复制当前环境
+        full_env.update(env)  # TODO: 覆盖敏感变量
+        proc = subprocess.run(command, env=full_env, capture_output=True, text=True)
+        # TODO: 把 stdout/stderr 写入 logs_dir（下一轮扩展）
+        return proc.returncode
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)  # TODO: 无论结果如何都要删除临时目录

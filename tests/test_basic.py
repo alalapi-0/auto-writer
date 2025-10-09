@@ -109,7 +109,7 @@ def test_job_packager_output_matches_schema(tmp_path: Path) -> None:
     payload_topics = [
         {"character_name": "夏洛克", "work": "神探夏洛克", "keyword": "行为主义"}
     ]
-    job_path, env_path = vps_job_packager.pack_job_and_env(
+    job_path, temp_dir, env_path = vps_job_packager.pack_job_and_env(
         settings,
         run_id="test-run",
         run_date="2025-10-02",
@@ -123,6 +123,7 @@ def test_job_packager_output_matches_schema(tmp_path: Path) -> None:
     job_data = json.loads(job_path.read_text(encoding="utf-8"))
     jsonschema.validate(instance=job_data, schema=schema)
     assert env_path.exists()
+    assert temp_dir.exists()
 
 
 def test_parser_persist_and_enrich() -> None:
