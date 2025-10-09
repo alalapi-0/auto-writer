@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse  # 解析命令行参数
 from typing import List  # 为适配器集合提供类型注解
 
-import structlog  # 结构化日志库，便于输出 JSON 日志
+from app.utils.logger import get_logger  # 引入统一日志模块
 
 from config.settings import settings  # 导入全局配置，获取 API Key 与数据库信息
 from app.generator.article_generator import (  # 引入文章生成器类，封装 LLM 调用占位
@@ -31,7 +31,7 @@ from app.delivery.wechat_mp_adapter import (  # 微信公众号适配器占位�
 from app.dedup.deduplicator import ArticleDeduplicator  # 去重服务，防止重复发文
 from app.db.migrate import init_database  # 初始化数据库函数，确保表存在
 
-LOGGER = structlog.get_logger()  # 获取结构化日志记录器，后续记录流程状态
+LOGGER = get_logger(__name__)  # 使用统一日志模块获取记录器
 
 
 def main(topic: str = "AI 技术趋势") -> None:
@@ -44,6 +44,7 @@ def main(topic: str = "AI 技术趋势") -> None:
         任何在投递过程中的异常都会被捕获并记录到结构化日志中。
     """
 
+    LOGGER.info("启动文章生成流程 topic=%s", topic)  # 记录流程启动与输入主题
     init_database()  # 初始化数据库，确保数据表结构存在且满足 schema.sql 定义
     generator = ArticleGenerator(  # 创建文章生成器实例
         api_key=settings.openai_api_key  # 传入 API Key（占位用，真实需有效凭证）
@@ -53,9 +54,9 @@ def main(topic: str = "AI 技术趋势") -> None:
     article_payload = generator.generate_article(topic=topic)  # 调用生成器生成文章草稿结构
     if not deduplicator.is_unique(article_payload):  # 判断文章是否重复或关键词冲突
         LOGGER.info(  # 使用结构化日志记录跳过事件
-            "article_skipped",
-            reason="duplicate",
-            topic=topic,
+            "article_skipped reason=%s topic=%s",
+            "duplicate",
+            topic,
         )
         return  # 若重复则终止后续投递逻辑
 
@@ -76,18 +77,22 @@ def main(topic: str = "AI 技术趋势") -> None:
         try:
             adapter.deliver(article_payload)  # 调用适配器 deliver 方法推送文章
             LOGGER.info(  # 输出成功日志，记录平台与标题
-                "delivery_success", platform=adapter.platform_name, title=article_payload.get("title")
+                "delivery_success platform=%s title=%s",
+                adapter.platform_name,
+                article_payload.get("title"),
             )
         except NotImplementedError:
             LOGGER.warning(  # 接口尚未实现时记录警告日志，提醒后续填充
-                "delivery_not_implemented", platform=adapter.platform_name
+                "delivery_not_implemented platform=%s",
+                adapter.platform_name,
             )
         except Exception as exc:  # 捕获其他所有异常，避免任务整体崩溃
             LOGGER.error(  # 使用结构化日志输出错误详情
-                "delivery_failed",
-                platform=adapter.platform_name,
-                error=str(exc),
+                "delivery_failed platform=%s error=%s",
+                adapter.platform_name,
+                str(exc),
             )
+    LOGGER.info("文章生成流程结束 topic=%s", topic)  # 记录流程结束
 
 
 if __name__ == "__main__":  # 当脚本直接执行时
