@@ -1,4 +1,4 @@
-.PHONY: init run lint test run-local-orchestrator deliver retry-due doctor report test-e2e  # 新增: 声明新目标
+.PHONY: init run lint test run-local-orchestrator deliver retry-due doctor report test-e2e playwright-install publish-all publish-one  # 新增: 声明新目标
 
 init:
 	# 初始化依赖：优先使用 poetry，若失败则回退到 pip
@@ -44,5 +44,17 @@ lint:
 	@echo "Linting complete"
 
 test:
-	# 运行 pytest 测试用例
-	pytest
+        # 运行 pytest 测试用例
+        pytest
+
+playwright-install:
+	# 安装 Chromium 以便 Playwright 自动化
+	python -m playwright install chromium
+
+publish-all:
+	# 批量投递全部草稿，支持传入 --day 与 --platforms
+	python -m scripts.publish_all
+
+publish-one:
+	# 仅投递单篇草稿，需指定平台与标题
+	python -m scripts.publish_one --platform $(PLATFORM) --title "$(TITLE)"

@@ -27,3 +27,6 @@ autowriter.db
 exports/
 logs/
 reports/
+.sessions/
+logs/screenshots/
+logs/traces/
