@@ -249,6 +249,19 @@ make run
   - **限流/非 2xx**：记录响应 body，必要时触发报警。
 - 监控建议：接入 ELK / Loki / CloudWatch，并结合 metrics 统计成功率、耗时、重复率。
 
+### Prometheus 指标导出
+- Dashboard 默认在 `http://127.0.0.1:8787/metrics` 暴露 Prometheus 指标（可通过 `PROMETHEUS_ENABLED` 开关控制）。
+- 可在 `prometheus.yml` 中追加抓取配置：
+  ```yaml
+  scrape_configs:
+    - job_name: autowriter_dashboard
+      metrics_path: /metrics
+      static_configs:
+        - targets: ["127.0.0.1:8787"]
+  ```
+- 指标包含运行总数、生成次数、按平台投递结果、作业耗时直方图与插件错误计数，便于构建成功率与耗时趋势图。
+- **生产环境注意**：仅在本机或内网暴露 `/metrics`，建议结合反向代理、mTLS 或防火墙限制访问来源，避免指标接口被滥用。
+
 ## 11. 开发、测试与质量
 - 常用命令：
   - `make lint`：运行 Ruff 检查与格式化。

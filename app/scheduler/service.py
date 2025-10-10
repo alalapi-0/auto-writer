@@ -4,6 +4,7 @@ from __future__ import annotations  # 启用未来注解语法
 
 import threading  # 提供本地锁
 from datetime import datetime, timezone  # 处理时间
+from time import perf_counter  # 高精度耗时计算
 from pathlib import Path  # 处理路径
 from zoneinfo import ZoneInfo  # 处理时区
 
@@ -16,6 +17,12 @@ from app.db.migrate_sched import run_migrations, sched_session_scope  # 调度�
 from app.db.models_sched import JobRun, Profile, Schedule  # ORM 模型
 from app.profiles.loader import sync_profiles  # Profile 同步函数
 from app.telemetry.client import emit_metric  # 指标上报
+from app.telemetry.metrics import (  # Prometheus 指标埋点工具
+    inc_delivery,  # 记录投递结果计数
+    inc_generation,  # 记录生成次数
+    inc_run,  # 记录作业运行结果
+    observe_latency,  # 记录作业耗时
+)  # 导入结束
 from app.plugins.loader import apply_filter_hooks, run_exporter_hook  # 插件 Hook
 from app.utils.logger import get_logger  # 日志工具
 
@@ -62,6 +69,8 @@ def run_profile(profile_id: int) -> None:  # 供 APScheduler 调用的任务函�
     """执行单个 Profile 的生成与投递流程（示例实现）。"""  # 中文说明
 
     lock = _get_lock(profile_id)  # 获取锁
+    start_ts = perf_counter()  # 记录任务开始的高精度时间戳
+    profile_label = str(profile_id)  # 默认使用 profile_id 作为标签
     if not lock.acquire(blocking=False):  # 尝试获取锁
         LOGGER.info("Profile 仍在执行，跳过 profile_id=%s", profile_id)  # 记录提示
         return  # 直接返回
@@ -71,6 +80,7 @@ def run_profile(profile_id: int) -> None:  # 供 APScheduler 调用的任务函�
             profile = session.query(Profile).filter(Profile.id == profile_id).one_or_none()  # 查询 Profile
             if profile is None or not profile.is_enabled:  # 校验启用状态
                 LOGGER.warning("Profile 不存在或已禁用 profile_id=%s", profile_id)  # 记录警告
+                inc_run("skipped", profile_label)  # 记录一次跳过
                 return  # 直接返回
             job = JobRun(profile_id=profile_id, status="running")  # 创建运行记录
             session.add(job)  # 添加记录
@@ -78,6 +88,8 @@ def run_profile(profile_id: int) -> None:  # 供 APScheduler 调用的任务函�
             job_id = job.id  # 保存 ID
             yaml_path = profile.yaml_path  # 缓存 YAML 路径
             profile_name = profile.name  # 缓存 Profile 名称
+            if profile_name:  # 若存在 profile 名称
+                profile_label = profile_name  # 使用更友好的标签
         profile_yaml = _load_profile_yaml(yaml_path)  # 加载 YAML 配置
         plan_payload = {"profile": profile_name, "timestamp": _now_local().isoformat()}  # 构造计划数据
         plan_payload = apply_filter_hooks("on_before_generate", plan_payload)  # 调用生成前 Hook
@@ -87,6 +99,7 @@ def run_profile(profile_id: int) -> None:  # 供 APScheduler 调用的任务函�
             "profile": profile_name,  # 记录 Profile 名称
         }
         article = apply_filter_hooks("on_after_generate", article)  # 调用生成后 Hook
+        inc_generation(profile_label)  # 记录生成成功
         platforms = profile_yaml.get("delivery", {}).get("platforms", [])  # 获取投递平台
         success_count = 0  # 初始化成功计数
         for platform in platforms:  # 遍历平台
@@ -95,6 +108,7 @@ def run_profile(profile_id: int) -> None:  # 供 APScheduler 调用的任务函�
             run_exporter_hook("on_after_publish", result, platform)  # 发布后 Hook
             success_count += 1  # 模拟成功
             emit_metric("delivery", "platform_success", 1, profile_id=profile_id, platform=platform)  # 上报指标
+            inc_delivery(platform, "success")  # 记录投递成功
         emit_metric("generation", "articles_emitted", 1, profile_id=profile_id)  # 上报生成指标
         with sched_session_scope() as session:  # 再次打开 Session 更新状态
             job = session.query(JobRun).filter(JobRun.id == job_id).one()  # 获取记录
@@ -103,6 +117,8 @@ def run_profile(profile_id: int) -> None:  # 供 APScheduler 调用的任务函�
             job.emitted_articles = 1  # 写入生成数量
             job.delivered_success = success_count  # 写入成功数量
             job.delivered_failed = max(0, len(platforms) - success_count)  # 写入失败数量
+        inc_run("success", profile_label)  # 记录成功运行
+        observe_latency(profile_label, perf_counter() - start_ts)  # 记录耗时
     except Exception as exc:  # noqa: BLE001
         LOGGER.exception("Profile 执行失败 profile_id=%s", profile_id)  # 记录异常
         if job_id is not None:  # 若已有运行记录
@@ -112,6 +128,8 @@ def run_profile(profile_id: int) -> None:  # 供 APScheduler 调用的任务函�
                 job.finished_at = _now_utc_naive()
                 job.error = str(exc)
         emit_metric("error", "profile_failure", 1, profile_id=profile_id)  # 上报失败指标
+        inc_run("failed", profile_label)  # 记录失败运行
+        observe_latency(profile_label, perf_counter() - start_ts)  # 记录失败耗时
     finally:  # 收尾逻辑
         lock.release()  # 释放锁
 

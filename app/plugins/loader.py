@@ -5,12 +5,13 @@ from __future__ import annotations  # 启用未来注解语法
 import importlib.util  # 动态加载模块
 from dataclasses import dataclass  # 使用 dataclass 存储插件信息
 from pathlib import Path  # 处理路径
-from typing import Callable, Dict, List  # 类型提示
+from typing import Callable, Dict, List, Tuple  # 类型提示
 
 from config.settings import settings  # 引入配置
 from app.db.migrate_sched import sched_session_scope  # 调度库 Session
 from app.db.models_sched import PluginRegistry  # 插件注册表模型
 from app.utils.logger import get_logger  # 日志工具
+from app.telemetry.metrics import inc_plugin_error  # 引入插件错误指标
 
 LOGGER = get_logger(__name__)  # 初始化日志
 
@@ -136,10 +137,14 @@ class PluginManager:  # 插件管理器
                 record.enabled = False
                 record.last_error = error
 
-    def iter_hooks(self, kind: str, hook_name: str) -> List[Callable]:  # 返回 Hook 列表
-        """按照类型返回指定 Hook 的可调用列表。"""  # 中文说明
+    def iter_hooks(self, kind: str, hook_name: str) -> List[Tuple[str, Callable]]:  # 返回 Hook 列表
+        """按照类型返回指定 Hook 的可调用列表与插件名称。"""  # 中文说明
 
-        return [plugin.hooks[hook_name] for plugin in self._plugins.get(kind, []) if hook_name in plugin.hooks]
+        return [
+            (plugin.name, plugin.hooks[hook_name])  # 返回插件名称与 Hook
+            for plugin in self._plugins.get(kind, [])  # 遍历注册插件
+            if hook_name in plugin.hooks  # 过滤缺少 Hook 的插件
+        ]  # 结果列表
 
 
 _manager: PluginManager | None = None  # 模块级缓存管理器
@@ -159,11 +164,12 @@ def apply_filter_hooks(stage: str, payload: Dict) -> Dict:  # 过滤 Hook 调用
     """根据阶段调用 filter 插件并返回处理后的 payload。"""  # 中文说明
 
     manager = get_manager()
-    for hook in manager.iter_hooks("filters", stage):
+    for plugin_name, hook in manager.iter_hooks("filters", stage):  # 遍历插件 Hook
         try:
             payload = hook(payload) or payload
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("过滤插件执行失败 stage=%s error=%s", stage, exc)
+            inc_plugin_error(plugin_name)  # 记录插件错误
     return payload
 
 
@@ -171,8 +177,9 @@ def run_exporter_hook(stage: str, payload: Dict, platform: str) -> None:  # 导�
     """触发 exporters 插件，忽略异常以保护主流程。"""  # 中文说明
 
     manager = get_manager()
-    for hook in manager.iter_hooks("exporters", stage):
+    for plugin_name, hook in manager.iter_hooks("exporters", stage):  # 遍历导出 Hook
         try:
             hook(payload, platform)
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("导出插件执行失败 stage=%s error=%s", stage, exc)
+            inc_plugin_error(plugin_name)  # 记录插件错误
