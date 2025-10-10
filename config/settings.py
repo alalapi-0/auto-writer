@@ -96,6 +96,12 @@ PLUGINS_ENABLED_DEFAULT = os.getenv("PLUGINS_ENABLED", "filters,no_call_to_actio
 METRICS_BUFFER_MAX_DEFAULT = _get_env_int("METRICS_BUFFER_MAX", 1000)  # 新增: 遥测缓冲上限
 JWT_ACCESS_EXPIRE_MIN_DEFAULT = _get_env_int("JWT_ACCESS_EXPIRE_MIN", 1440)  # 新增: JWT 过期时间
 ADMIN_INIT_TOKEN_DEFAULT = os.getenv("ADMIN_INIT_TOKEN", "")  # 新增: 首次管理员初始化令牌
+OIDC_ENABLE_DEFAULT = _get_env_bool("OIDC_ENABLE", False)  # 新增: OIDC 登录开关
+OIDC_ISSUER_DEFAULT = os.getenv("OIDC_ISSUER", "")  # 新增: OIDC Issuer 地址
+OIDC_CLIENT_ID_DEFAULT = os.getenv("OIDC_CLIENT_ID", "")  # 新增: OIDC 客户端 ID
+OIDC_CLIENT_SECRET_DEFAULT = os.getenv("OIDC_CLIENT_SECRET", "")  # 新增: OIDC 客户端密钥
+OIDC_REDIRECT_PATH_DEFAULT = os.getenv("OIDC_REDIRECT_PATH", "/auth/oidc/callback")  # 新增: OIDC 回调路径
+OIDC_AUTO_CREATE_VIEWER_DEFAULT = _get_env_bool("OIDC_AUTO_CREATE_VIEWER", True)  # 新增: 自动创建 viewer 用户
 
 
 class ConfigError(Exception):
@@ -187,6 +193,12 @@ class Settings:
     jwt_access_expire_min: int = JWT_ACCESS_EXPIRE_MIN_DEFAULT  # 新增: JWT 过期时间
     admin_init_token: str = ADMIN_INIT_TOKEN_DEFAULT  # 新增: 首次管理员初始化令牌
     prometheus_enabled: bool = PROMETHEUS_ENABLED_DEFAULT  # 新增: Prometheus 指标开关
+    oidc_enable: bool = OIDC_ENABLE_DEFAULT  # 新增: OIDC 登录开关
+    oidc_issuer: str = OIDC_ISSUER_DEFAULT  # 新增: OIDC Issuer 地址
+    oidc_client_id: str = OIDC_CLIENT_ID_DEFAULT  # 新增: OIDC 客户端 ID
+    oidc_client_secret: str = OIDC_CLIENT_SECRET_DEFAULT  # 新增: OIDC 客户端密钥
+    oidc_redirect_path: str = OIDC_REDIRECT_PATH_DEFAULT  # 新增: OIDC 回调路径
+    oidc_auto_create_viewer: bool = OIDC_AUTO_CREATE_VIEWER_DEFAULT  # 新增: OIDC 自动创建 viewer 策略
 
     # === 平台开关与凭据 ===
     enable_wechat_mp: bool = False  # TODO: 微信公众号默认关闭

@@ -142,6 +142,23 @@ OLLAMA_BASE_URL=
 
 > 建议将 `.env` 仅保存在本地开发环境或密钥管理系统中，生产环境通过 CI/CD 动态注入，避免凭据泄露。
 
+### Dashboard OIDC 单点登录配置
+- **默认关闭**：`OIDC_ENABLE=false`，仍然保留用户名/密码登录；仅当企业 IdP 已准备就绪时才建议开启。
+- **配置步骤**：
+  1. 设置以下环境变量并重启 Dashboard：
+     - `OIDC_ENABLE=true`
+     - `OIDC_ISSUER=https://id.example.com`（IdP Issuer，支持 `.well-known/openid-configuration`）
+     - `OIDC_CLIENT_ID=`、`OIDC_CLIENT_SECRET=`（在 IdP 上注册的客户端；密钥必须通过环境变量注入，不要写入仓库或日志）
+     - `OIDC_REDIRECT_PATH=/auth/oidc/callback`（可改为企业门户统一路径，但需同步更新 IdP 回调列表）
+     - `OIDC_AUTO_CREATE_VIEWER=true`（默认开启首次登录自动创建 viewer 账号，可按需改为 `false`）
+  2. 确认 Dashboard 仍然绑定回环地址（例如 `DASHBOARD_BIND=127.0.0.1:8787`），通过反向代理/隧道对外发布，确保 OIDC 回调仅在受控网络中暴露。
+  3. 在 IdP 后台将 `https://<dashboard-host>/auth/oidc/callback`（或自定义路径）加入白名单，scope 建议包含 `openid email profile`。
+- **登录流程**：用户可选择“使用企业登录 / SSO 登录”跳转 IdP，验证成功后系统会将 email/sub 映射到本地账号；首登时可自动创建 viewer 角色，也可在禁用自动创建时预先建号。
+- **安全注意事项**：
+  - OIDC 客户端密钥仅通过环境变量读取，系统不会在日志或配置导出中展示。
+  - 回调页面仅负责下发本地 JWT，推荐依旧限制 Dashboard 的公网暴露，必要时结合 VPN 或零信任代理。
+  - 若需停用 OIDC，重置 `OIDC_ENABLE=false`，原有本地账号仍可使用。
+
 ### 需要调整的本地配置文件
 - `autowriter_text/config.yaml`：控制生成模型 (`llm.provider`、`llm.model`、`llm.base_url`)、批量大小 (`batch.count`) 与去重范围 (`dedup.scope`)，如需切换到云端推理或增减每日草稿，可在此修改后重启任务。
 - `app/generator/prompts/article_prompt_template.txt`：定义文章写作模板与语气，若要适配新风格或不同语言，请在保证结构完整的情况下修改该文件。

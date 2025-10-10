@@ -17,6 +17,12 @@
       </label>
       <button type="submit">登录</button> <!-- 提交按钮 -->
     </form>
+    {% if oidc_enabled %} <!-- OIDC 启用时展示企业登录入口 -->
+    <div class="sso-login"> <!-- 企业登录容器 -->
+      <p>或使用企业账号：</p> <!-- 提示文本 -->
+      <a class="button" href="{{ oidc_login_url }}">使用企业登录 / SSO 登录</a> <!-- 企业登录按钮 -->
+    </div>
+    {% endif %} <!-- 结束 OIDC 条件渲染 -->
     <p id="login-status"></p> <!-- 登录状态提示 -->
   </main>
   <script> // 简易提交脚本
