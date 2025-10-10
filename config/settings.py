@@ -38,6 +38,24 @@ def _parse_int(raw: str | None, default: int) -> int:  # 新增: 安全解析整
         return default  # 新增: 回退到默认值
 
 
+def _get_env_int(name: str, default: int) -> int:  # 新增: 封装整型环境变量读取
+    """读取整数环境变量，失败时回退默认值。"""  # 中文注释说明用途
+
+    try:  # 捕获转换异常
+        return int(os.getenv(name, default))  # 若读取失败则返回默认值
+    except ValueError:  # 非法数值
+        return default  # 使用默认值兜底
+
+
+def _get_env_bool(name: str, default: bool) -> bool:  # 新增: 读取布尔环境变量
+    """解析布尔环境变量，识别常见真值文本。"""  # 中文注释说明
+
+    raw = os.getenv(name)  # 读取原始字符串
+    if raw is None:  # 未设置
+        return default  # 返回默认值
+    return raw.lower() in {"1", "true", "yes", "on"}  # 判断常见真值
+
+
 DELIVERY_ENABLED_PLATFORMS = _parse_platform_list(  # 从环境变量解析启用的平台列表
     os.getenv("DELIVERY_ENABLED_PLATFORMS"),  # 读取 DELIVERY_ENABLED_PLATFORMS 环境变量用于覆盖默认值
     ["wechat_mp", "zhihu"],  # 默认启用微信公众号与知乎平台
@@ -49,6 +67,20 @@ RETRY_BASE_SECONDS = _parse_int(os.getenv("RETRY_BASE_SECONDS"), 300)  # 读取 
 RETRY_MAX_ATTEMPTS = _parse_int(os.getenv("RETRY_MAX_ATTEMPTS"), 5)  # 读取 RETRY_MAX_ATTEMPTS 环境变量，默认重试 5 次
 THEME_LOW_WATERMARK = _parse_int(os.getenv("THEME_LOW_WATERMARK"), 20)  # 读取 THEME_LOW_WATERMARK 环境变量，默认低水位 20
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()  # 读取 LOG_LEVEL 环境变量控制日志级别，默认 INFO
+PLAYWRIGHT_HEADLESS = _get_env_bool("HEADLESS", True)  # 新增: 控制浏览器是否无头
+SESSION_DIR_DEFAULT = os.getenv("SESSION_DIR", "./.sessions")  # 新增: 会话 Cookie 存放目录默认值
+WECHAT_COOKIE_PATH_DEFAULT = os.getenv(
+    "WECHAT_COOKIE_PATH", "./.sessions/wechat_mp.cookies.json"
+)  # 新增: 公众号 Cookie 文件路径
+ZHIHU_COOKIE_PATH_DEFAULT = os.getenv(
+    "ZHIHU_COOKIE_PATH", "./.sessions/zhihu.cookies.json"
+)  # 新增: 知乎 Cookie 文件路径
+PLAYWRIGHT_TIMEOUT_MS_DEFAULT = _get_env_int("PW_TIMEOUT_MS", 30000)  # 新增: 浏览器操作超时时间
+PLAYWRIGHT_SLOWMO_MS_DEFAULT = _get_env_int("PW_SLOWMO_MS", 0)  # 新增: 慢动作延迟，便于调试
+PLAYWRIGHT_SCREENSHOT_DIR_DEFAULT = os.getenv(
+    "PW_SHOT_DIR", "./logs/screenshots"
+)  # 新增: 截图输出目录
+PLAYWRIGHT_TRACING_DEFAULT = _get_env_bool("PW_TRACING", False)  # 新增: 是否开启 tracing 记录
 
 
 class ConfigError(Exception):
@@ -150,6 +182,14 @@ class Settings:
     retry_base_seconds: int = 300  # 新增: 重试基础秒数默认值
     retry_max_attempts: int = 5  # 新增: 最大重试次数默认值
     theme_low_watermark: int = 20  # 新增: 主题库存低水位默认值
+    playwright_headless: bool = True  # 新增: Playwright 是否无头运行
+    session_dir: str = "./.sessions"  # 新增: 会话 Cookie 目录
+    wechat_cookie_path: str = "./.sessions/wechat_mp.cookies.json"  # 新增: 公众号 Cookie 文件路径
+    zhihu_cookie_path: str = "./.sessions/zhihu.cookies.json"  # 新增: 知乎 Cookie 文件路径
+    playwright_timeout_ms: int = 30000  # 新增: 浏览器默认超时
+    playwright_slowmo_ms: int = 0  # 新增: 调试慢动作毫秒
+    playwright_screenshot_dir: str = "./logs/screenshots"  # 新增: 截图输出目录
+    playwright_tracing: bool = False  # 新增: 是否开启 tracing
 
     # === 保持原有字段 ===
     database: DatabaseConfig = field(
@@ -237,24 +277,6 @@ class Settings:
         return errs
 
 
-def _get_env_int(name: str, default: int) -> int:
-    """读取整数环境变量，失败时回退默认值。"""
-
-    try:
-        return int(os.getenv(name, default))
-    except ValueError:
-        return default
-
-
-def _get_env_bool(name: str, default: bool) -> bool:
-    """解析布尔环境变量，识别常见真值文本。"""
-
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.lower() in {"1", "true", "yes", "on"}
-
-
 def get_settings() -> Settings:
     """读取环境变量并生成配置对象。"""
 
@@ -317,6 +339,14 @@ def get_settings() -> Settings:
         logs_dir=Path(LOG_DIR),  # 新增: 使用环境变量指定日志目录
         exports_dir=Path(EXPORT_DIR),  # 新增: 使用环境变量指定导出目录
         theme_low_watermark=THEME_LOW_WATERMARK,  # 新增: 使用环境变量覆盖主题低水位
+        playwright_headless=PLAYWRIGHT_HEADLESS,  # 新增: Playwright 无头配置
+        session_dir=SESSION_DIR_DEFAULT,  # 新增: 会话目录设置
+        wechat_cookie_path=WECHAT_COOKIE_PATH_DEFAULT,  # 新增: 公众号 Cookie 路径
+        zhihu_cookie_path=ZHIHU_COOKIE_PATH_DEFAULT,  # 新增: 知乎 Cookie 路径
+        playwright_timeout_ms=PLAYWRIGHT_TIMEOUT_MS_DEFAULT,  # 新增: 操作超时
+        playwright_slowmo_ms=PLAYWRIGHT_SLOWMO_MS_DEFAULT,  # 新增: 慢动作间隔
+        playwright_screenshot_dir=PLAYWRIGHT_SCREENSHOT_DIR_DEFAULT,  # 新增: 截图目录
+        playwright_tracing=PLAYWRIGHT_TRACING_DEFAULT,  # 新增: tracing 开关
     )
 
     return settings_obj
@@ -348,6 +378,14 @@ def print_config(mask_secrets: bool = True) -> None:  # 定义打印配置的便
         ("最大重试次数", str(settings.retry_max_attempts), False),  # 重试上限
         ("主题低水位", str(settings.theme_low_watermark), False),  # 主题库存低水位
         ("启用平台", ",".join(settings.delivery_enabled_platforms), False),  # 平台启用列表
+        ("PLAYWRIGHT_HEADLESS", str(settings.playwright_headless), False),  # 浏览器无头模式
+        ("SESSION_DIR", settings.session_dir, False),  # 会话目录
+        ("WECHAT_COOKIE_PATH", settings.wechat_cookie_path, False),  # 公众号 Cookie 路径
+        ("ZHIHU_COOKIE_PATH", settings.zhihu_cookie_path, False),  # 知乎 Cookie 路径
+        ("PW_TIMEOUT_MS", str(settings.playwright_timeout_ms), False),  # 浏览器超时
+        ("PW_SLOWMO_MS", str(settings.playwright_slowmo_ms), False),  # 慢动作毫秒
+        ("PW_SHOT_DIR", settings.playwright_screenshot_dir, False),  # 截图目录
+        ("PW_TRACING", str(settings.playwright_tracing), False),  # tracing 开关
         ("OpenAI Key", settings.openai_api_key, True),  # OpenAI 凭据需脱敏
         ("WeChat Cookie", settings.wechat_mp_cookie or "", True),  # 微信凭据
         ("Zhihu Cookie", settings.zhihu_cookie or "", True),  # 知乎凭据
