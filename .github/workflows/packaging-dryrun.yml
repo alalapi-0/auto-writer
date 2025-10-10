@@ -1,0 +1,81 @@
+name: Packaging Dry Run # 工作流名称：打包配置干跑。# 中文说明
+on: # 触发条件定义。# 中文说明
+  push: # push 事件触发。# 中文说明
+    paths: # 指定路径过滤。# 中文说明
+      - "packaging/**" # 当打包配置变更时触发。# 中文说明
+      - "apps/desktop-electron/**" # Electron 应用目录变更时触发。# 中文说明
+  pull_request: # PR 事件触发。# 中文说明
+    paths: # 指定路径过滤。# 中文说明
+      - "packaging/**" # 同步推送路径过滤。# 中文说明
+      - "apps/desktop-electron/**" # 同步 Electron 目录。# 中文说明
+permissions: # 权限配置。# 中文说明
+  contents: read # 仅需读取代码内容。# 中文说明
+jobs: # 定义多个任务。# 中文说明
+  electron-dryrun: # Electron 干跑任务。# 中文说明
+    runs-on: ubuntu-latest # 使用 Ubuntu 最新 Runner。# 中文说明
+    steps: # 步骤列表。# 中文说明
+      - name: Checkout repository # 检出代码。# 中文说明
+        uses: actions/checkout@v4 # 官方检出动作。# 中文说明
+      - name: Setup Node.js # 设置 Node 环境。# 中文说明
+        uses: actions/setup-node@v4 # 官方 Node 动作。# 中文说明
+        with: # 动作参数。# 中文说明
+          node-version: "20" # 指定 Node 版本。# 中文说明
+          cache: "pnpm" # 启用 pnpm 缓存。# 中文说明
+      - name: Setup pnpm # 安装 pnpm。# 中文说明
+        uses: pnpm/action-setup@v2 # 官方 pnpm 动作。# 中文说明
+        with: # 动作参数。# 中文说明
+          version: 8 # 指定 pnpm 版本。# 中文说明
+      - name: Cache node_modules # 缓存 node_modules。# 中文说明
+        uses: actions/cache@v3 # 使用缓存动作。# 中文说明
+        with: # 参数配置。# 中文说明
+          path: | # 缓存路径。# 中文说明
+            ~/.pnpm-store # pnpm 全局缓存目录。# 中文说明
+            node_modules # 项目依赖目录。# 中文说明
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }} # 缓存键。# 中文说明
+          restore-keys: | # 回退键。# 中文说明
+            ${{ runner.os }}-pnpm- # 前缀匹配回退。# 中文说明
+      - name: Install dependencies # 安装依赖。# 中文说明
+        run: pnpm install # 执行依赖安装。# 中文说明
+      - name: Validate electron-builder config # 校验 electron-builder 配置。# 中文说明
+        run: pnpm exec electron-builder --config packaging/electron-builder/electron-builder.yml --dry-run # 使用干跑验证配置。# 中文说明
+      - name: Assert no artifacts # 确认未生成产物。# 中文说明
+        run: | # 运行脚本检查是否产生产物。# 中文说明
+          if find . -type f -regex '.*\\.\(exe\|app\|dmg\|AppImage\)'; then # 搜索常见打包产物。# 中文说明
+            echo "Detected forbidden build artifacts." && exit 1 # 输出错误并失败。# 中文说明
+          fi # 未发现则继续。# 中文说明
+        shell: bash # 指定 shell。# 中文说明
+  tauri-dryrun: # Tauri 干跑任务。# 中文说明
+    runs-on: ubuntu-latest # 使用 Ubuntu Runner。# 中文说明
+    steps: # 步骤列表。# 中文说明
+      - name: Checkout repository # 检出代码。# 中文说明
+        uses: actions/checkout@v4 # 官方检出动作。# 中文说明
+      - name: Setup Rust toolchain # 安装 Rust 工具链。# 中文说明
+        uses: actions-rs/toolchain@v1 # Rust 官方动作。# 中文说明
+        with: # 参数配置。# 中文说明
+          profile: minimal # 使用最小安装配置。# 中文说明
+          toolchain: stable # 安装稳定版工具链。# 中文说明
+          override: true # 设置为默认工具链。# 中文说明
+      - name: Cache cargo registry and target # 缓存 Cargo 注册表与构建目录。# 中文说明
+        uses: actions/cache@v3 # 使用缓存动作。# 中文说明
+        with: # 参数配置。# 中文说明
+          path: | # 缓存路径。# 中文说明
+            ~/.cargo/registry # 缓存 crates 索引。# 中文说明
+            ~/.cargo/git # 缓存 git 源。# 中文说明
+            target # 缓存构建产物目录。# 中文说明
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }} # 缓存键。# 中文说明
+          restore-keys: | # 回退键。# 中文说明
+            ${{ runner.os }}-cargo- # 前缀回退。# 中文说明
+      - name: Install Tauri CLI # 安装 tauri-cli。# 中文说明
+        run: cargo install tauri-cli --locked # 安装命令。# 中文说明
+      - name: Tauri help # 输出 tauri 帮助，确认 CLI 可用。# 中文说明
+        run: tauri --help # 执行帮助命令。# 中文说明
+      - name: Tauri config dry run # 使用自定义环境变量进行干跑。# 中文说明
+        env: # 环境变量配置。# 中文说明
+          TAURI_SKIP_BUILD: "1" # 自定义变量指示仅校验配置。# 中文说明
+        run: tauri build --ci --debug # 构建命令，将由脚本根据环境变量跳过产物写出。# 中文说明
+      - name: Assert no artifacts # 确认未生成产物。# 中文说明
+        run: | # 运行脚本检查是否产生产物。# 中文说明
+          if find . -type f -regex '.*\\.\(exe\|app\|dmg\|AppImage\)'; then # 搜索常见打包产物。# 中文说明
+            echo "Detected forbidden build artifacts." && exit 1 # 输出错误并失败。# 中文说明
+          fi # 未发现则继续。# 中文说明
+        shell: bash # 指定 shell。# 中文说明

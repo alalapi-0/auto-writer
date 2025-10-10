@@ -35,3 +35,12 @@ outbox_quarantine/
 profiles/*.yml
 !profiles/default.yml
 !profiles/psy_film.yml
+# 忽略桌面应用构建输出，避免误提交产物。# 中文说明
+apps/desktop-electron/dist/ # Electron 构建输出目录。# 中文说明
+packaging/**/dist/ # 打包脚本的输出目录占位。# 中文说明
+*.app # macOS 应用包产物。# 中文说明
+*.dmg # macOS 安装镜像。# 中文说明
+*.exe # Windows 可执行文件。# 中文说明
+*.deb # Debian 安装包。# 中文说明
+*.rpm # RPM 安装包。# 中文说明
+*.AppImage # Linux AppImage 包。# 中文说明
