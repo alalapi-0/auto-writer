@@ -21,6 +21,7 @@ from app.db.migrate_sched import run_migrations, sched_session_scope  # 调度�
 from app.db.models_sched import JobRun, MetricEvent, Schedule, User  # ORM 模型
 from app.dispatch.api import router as dispatch_router  # 分发队列路由
 from app.dispatch.store import run_dispatch_migrations  # 分发库迁移
+from app.dashboard.views.alerts import router as alerts_router  # 告警面板路由
 from app.scheduler.api import list_schedules, pause_schedule, resume_schedule, run_now  # 调度控制
 from app.utils.logger import get_logger  # 日志工具
 from app.telemetry.metrics import (  # Prometheus 指标工具
@@ -36,6 +37,7 @@ TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates")) 
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")  # 挂载静态目录
 app.include_router(oidc_router)  # 注册 OIDC 相关路由
 app.include_router(dispatch_router)  # 注册分发队列路由
+app.include_router(alerts_router)  # 注册告警面板路由
 
 
 if PROMETHEUS_ENABLED:  # 当启用 Prometheus 时注册指标路由

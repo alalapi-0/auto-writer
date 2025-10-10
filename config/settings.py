@@ -89,6 +89,9 @@ DASHBOARD_BIND_DEFAULT = os.getenv("DASHBOARD_BIND", "127.0.0.1:8787")  # 新增
 DASHBOARD_JWT_SECRET_VALUE = os.getenv("DASHBOARD_JWT_SECRET", "")  # 新增: Dashboard JWT 密钥
 DASHBOARD_ENABLE_REMOTE_DEFAULT = _get_env_bool("DASHBOARD_ENABLE_REMOTE", False)  # 新增: 是否允许远程访问
 PROMETHEUS_ENABLED_DEFAULT = _get_env_bool("PROMETHEUS_ENABLED", True)  # 新增: Prometheus 指标导出开关
+ALERTS_PULL_ENDPOINT_DEFAULT = os.getenv(  # 新增: 告警面板默认拉取地址
+    "ALERTS_PULL_ENDPOINT", "http://127.0.0.1:9093/api/v2/alerts"
+)  # 新增: 默认指向本地 Alertmanager API
 INGEST_ENDPOINT_DEFAULT = os.getenv("INGEST_ENDPOINT", "http://127.0.0.1:8787/api/ingest")  # 新增: 遥测上报地址
 SCHED_ENABLE_DEFAULT = _get_env_bool("SCHED_ENABLE", True)  # 新增: 是否启动调度
 SCHED_MAX_PARALLEL_DEFAULT = _get_env_int("SCHED_MAX_PARALLEL", 1)  # 新增: 同一 profile 并行度
@@ -192,6 +195,7 @@ class Settings:
     dashboard_bind: str = DASHBOARD_BIND_DEFAULT  # 新增: Dashboard 监听地址
     dashboard_jwt_secret: str = DASHBOARD_JWT_SECRET_VALUE  # 新增: Dashboard JWT 密钥
     dashboard_enable_remote: bool = DASHBOARD_ENABLE_REMOTE_DEFAULT  # 新增: 是否允许远程访问
+    alerts_pull_endpoint: str = ALERTS_PULL_ENDPOINT_DEFAULT  # 新增: 告警面板数据源
     ingest_endpoint: str = INGEST_ENDPOINT_DEFAULT  # 新增: 遥测上报入口
     sched_enable: bool = SCHED_ENABLE_DEFAULT  # 新增: 是否启用调度服务
     sched_max_parallel: int = SCHED_MAX_PARALLEL_DEFAULT  # 新增: 单 Profile 并行度

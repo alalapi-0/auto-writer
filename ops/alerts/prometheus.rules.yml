@@ -1,0 +1,65 @@
+# AutoWriter 告警规则文件，覆盖核心运行指标。  # 说明
+# 所有表达式均为示例，请结合实际指标名称与阈值调整。  # 注意
+
+groups:  # 定义规则组集合
+  - name: autowriter-core  # 规则组名称
+    rules:  # 规则列表
+      - alert: DashboardDown  # 告警名称：Dashboard 不可用
+        expr: up{job="autowriter-dashboard"} == 0  # 表达式：Dashboard 目标全为 0
+        for: 1m  # 持续 1 分钟触发
+        labels:  # 告警标签
+          severity: critical  # 严重级别
+          team: platform  # 负责团队
+        annotations:  # 注释信息
+          summary: AutoWriter Dashboard 不可用  # 摘要
+          description: >-  # 详细描述开头
+            Dashboard 服务在 1 分钟内持续无响应，请检查容器、负载均衡或上游网络。  # 描述
+
+      - alert: QueueBacklogHigh  # 告警名称：队列积压
+        expr: autowriter_queue_pending > 200  # 表达式：待处理任务超过阈值
+        for: 5m  # 持续 5 分钟触发
+        labels:  # 标签
+          severity: warning  # 严重级别
+          team: platform  # 团队
+        annotations:  # 注释
+          summary: AutoWriter 队列积压过高  # 摘要
+          description: >-  # 详细描述开头
+            最近 5 分钟内调度队列待处理任务持续高于 200，请检查 Worker 扩容与上游流量。  # 描述
+
+      - alert: DeadLetterSpike  # 告警名称：死信激增
+        expr: increase(autowriter_dead_total[5m]) > 5  # 表达式：5 分钟内死信增量超过阈值
+        for: 0m  # 立即触发
+        labels:  # 标签
+          severity: critical  # 严重级别
+          team: platform  # 团队
+        annotations:  # 注释
+          summary: AutoWriter 死信激增  # 摘要
+          description: >-  # 详细描述
+            过去 5 分钟内死信数量增量超过 5，请排查异常任务与下游依赖。  # 描述
+
+      - alert: WorkerStale  # 告警名称：Worker 心跳异常
+        expr: time() - autowriter_worker_last_seen_seconds > 180  # 表达式：距上次心跳超过 3 分钟
+        for: 2m  # 持续 2 分钟触发
+        labels:  # 标签
+          severity: warning  # 严重级别
+          team: platform  # 团队
+        annotations:  # 注释
+          summary: AutoWriter Worker 心跳超时  # 摘要
+          description: >-  # 详细描述
+            Worker {{ $labels.agent }} 心跳延迟超过 180 秒，可能已下线，请检查实例状态与网络。  # 描述
+
+      - alert: DeliveryFailureRate  # 告警名称：投递失败率过高
+        expr: |
+          (
+            increase(autowriter_delivery_failed_total[5m])
+            /
+            clamp_min(increase(autowriter_delivery_total[5m]), 1)
+          ) > 0.2  # 表达式：5 分钟失败率超过 20%
+        for: 5m  # 持续 5 分钟触发
+        labels:  # 标签
+          severity: critical  # 严重级别
+          team: platform  # 团队
+        annotations:  # 注释
+          summary: AutoWriter 投递失败率过高  # 摘要
+          description: >-  # 详细描述
+            过去 5 分钟内投递失败率超过 20%，请检查下游渠道、凭据与最近发布。  # 描述
