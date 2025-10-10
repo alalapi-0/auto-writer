@@ -3,12 +3,14 @@
 from __future__ import annotations  # 启用未来注解语法
 
 import json  # 读取 JSON 文本
+import random  # 随机抽检使用
 from datetime import datetime  # 获取当前时间戳
 from pathlib import Path  # 处理文件路径
 from typing import List  # 类型提示
 
 from sqlalchemy.orm import Session  # SQLAlchemy 会话类型
 
+from config.settings import settings  # 读取配置项
 from app.db import models  # 导入 ORM 模型
 from app.growth.enricher import enrich_keywords  # 引入事后补词逻辑
 
@@ -34,6 +36,14 @@ def persist_results(session: Session, run: models.Run, result: dict) -> List[str
     now = datetime.utcnow()  # 获取当前时间
     articles = result.get("articles", [])  # 提取文章列表
     for article_payload in articles:  # 遍历每篇文章
+        tags_raw = article_payload.get("tags")  # 读取标签原始值
+        if isinstance(tags_raw, str):  # 字符串按逗号拆分
+            tags_value = [item.strip() for item in tags_raw.split(",") if item.strip()]
+        elif isinstance(tags_raw, list):  # 已经是列表直接使用
+            tags_value = tags_raw
+        else:
+            tags_value = None  # 其他类型一律忽略
+
         draft = models.ArticleDraft(  # 构造草稿记录
             run_id=run.id,
             character_name=article_payload.get("character_name", ""),
@@ -41,12 +51,15 @@ def persist_results(session: Session, run: models.Run, result: dict) -> List[str
             keyword=article_payload.get("keyword", ""),
             title=article_payload.get("title"),
             status=article_payload.get("status", "unknown"),
+            summary=article_payload.get("summary"),
+            tags=tags_value,
             content=article_payload.get("content"),
         )
         session.add(draft)  # 写入草稿
         session.flush()  # 刷新以获得草稿 ID
 
         audit_payload = article_payload.get("quality_audit") or {}  # 读取质量审计信息
+        audit_record = None  # 预留变量，用于后续更新人工复核状态
         for platform_result in article_payload.get("platform_results", []):  # 处理平台投递日志
             log = models.PlatformLog(
                 article_id=draft.id,
@@ -77,6 +90,27 @@ def persist_results(session: Session, run: models.Run, result: dict) -> List[str
                 manual_review=bool(article_payload.get("manual_review")),
             )
             session.add(audit_record)
+
+        passed = bool(audit_payload.get("passed"))  # 读取质量闸门是否通过
+        needs_review = False  # 默认不进入人工复核
+        reason = "sampling"  # 默认原因
+        if not passed:  # 闸门失败强制入队
+            needs_review = True
+            reason = "guard_failed"
+        elif settings.qa_sampling_rate > 0 and random.random() < settings.qa_sampling_rate:  # 按比例抽检
+            needs_review = True
+            reason = "sampling"
+
+        if needs_review:  # 需要进入复核队列
+            queue_item = models.ReviewQueue(
+                draft_id=draft.id,
+                reason=reason,
+                status="pending",
+            )
+            session.add(queue_item)
+            draft.status = "pending_review"  # 更新草稿状态为待复核
+            if audit_record is not None:  # 标记审计记录进入人工复核
+                audit_record.manual_review = True
 
         used_pair = models.UsedPair(  # 构造 used_pairs 记录
             character_name=draft.character_name,

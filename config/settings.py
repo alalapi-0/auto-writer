@@ -84,6 +84,14 @@ PLAYWRIGHT_SCREENSHOT_DIR_DEFAULT = os.getenv(
     "PW_SHOT_DIR", "./logs/screenshots"
 )  # 新增: 截图输出目录
 PLAYWRIGHT_TRACING_DEFAULT = _get_env_bool("PW_TRACING", False)  # 新增: 是否开启 tracing 记录
+QA_SAMPLING_RATE = float(os.getenv("QA_SAMPLING_RATE", 0.2))  # 新增: 质量抽检比例，默认 20%
+QA_EDIT_ALLOW_FIELDS = [  # 新增: 人工复核允许编辑的字段白名单
+    "title",  # 标题字段
+    "tags",  # 标签字段
+    "summary",  # 摘要字段
+    "body",  # 正文字段
+]  # 白名单列表
+QA_APPROVE_AUTODELIVER = _get_env_bool("QA_APPROVE_AUTODELIVER", False)  # 新增: 审核通过后是否自动投递
 TZ_DEFAULT = os.getenv("TZ", "Asia/Tokyo")  # 新增: 调度与展示统一时区默认值
 DASHBOARD_BIND_DEFAULT = os.getenv("DASHBOARD_BIND", "127.0.0.1:8787")  # 新增: Dashboard 监听地址
 DASHBOARD_JWT_SECRET_VALUE = os.getenv("DASHBOARD_JWT_SECRET", "")  # 新增: Dashboard JWT 密钥
@@ -254,6 +262,11 @@ class Settings:
     playwright_slowmo_ms: int = 0  # 新增: 调试慢动作毫秒
     playwright_screenshot_dir: str = "./logs/screenshots"  # 新增: 截图输出目录
     playwright_tracing: bool = False  # 新增: 是否开启 tracing
+    qa_sampling_rate: float = QA_SAMPLING_RATE  # 新增: 质量抽检比例
+    qa_edit_allow_fields: List[str] = field(  # 新增: 人工复核可编辑字段
+        default_factory=lambda: list(QA_EDIT_ALLOW_FIELDS)
+    )
+    qa_approve_autodeliver: bool = QA_APPROVE_AUTODELIVER  # 新增: 审核通过是否自动投递
 
     # === 保持原有字段 ===
     database: DatabaseConfig = field(
@@ -424,6 +437,9 @@ def get_settings() -> Settings:
         playwright_slowmo_ms=PLAYWRIGHT_SLOWMO_MS_DEFAULT,  # 新增: 慢动作间隔
         playwright_screenshot_dir=PLAYWRIGHT_SCREENSHOT_DIR_DEFAULT,  # 新增: 截图目录
         playwright_tracing=PLAYWRIGHT_TRACING_DEFAULT,  # 新增: tracing 开关
+        qa_sampling_rate=QA_SAMPLING_RATE,  # 新增: 注入抽检比例
+        qa_edit_allow_fields=list(QA_EDIT_ALLOW_FIELDS),  # 新增: 注入可编辑字段
+        qa_approve_autodeliver=QA_APPROVE_AUTODELIVER,  # 新增: 注入自动投递策略
     )
 
     return settings_obj

@@ -7,6 +7,8 @@ import random  # 提供随机权重选择
 from collections import defaultdict  # 构建默认计数器
 from typing import Iterable, Mapping  # 类型提示
 
+from app.prompting import feedback  # 引入反馈模块，融合人工复核权重
+
 _ROUND_ROBIN_STATE = defaultdict(itertools.count)  # 存储不同 Variant 集合的轮询指针
 
 
@@ -37,9 +39,13 @@ def select_variant(  # 对外统一选择入口
 
     if strategy == "weighted":  # 权重策略
         weights = config.get("weights") or {}  # 读取权重配置
+        dynamic_weights = feedback.get_dynamic_weights(variants)  # 读取人工复核动态权重
         pool: list[str] = []  # 构造重复列表用于随机选择
         for variant in variants:  # 遍历候选 Variant
-            weight = float(weights.get(variant, 0))  # 获取权重，默认 0
+            base_weight = float(weights.get(variant, 0) or 0)  # 获取配置权重，默认 0
+            dynamic = float(dynamic_weights.get(variant, 1.0))  # 动态权重默认 1
+            weight = base_weight if base_weight > 0 else 1.0  # 若配置缺失则回退 1
+            weight *= max(dynamic, 0.0)  # 乘以动态权重
             count = max(int(weight * 100), 0)  # 放大到整数次数
             pool.extend([variant] * count)  # 按权重扩充池
         if not pool:  # 若权重池为空

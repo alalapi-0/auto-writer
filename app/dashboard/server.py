@@ -4,9 +4,11 @@ from __future__ import annotations  # 启用未来注解语法
 
 import csv  # 导出 CSV
 from contextlib import contextmanager  # 提供主库 Session 上下文
+from datetime import datetime  # 审核动作时间戳
+from difflib import SequenceMatcher  # 估算文本编辑幅度
 from io import StringIO  # 构建内存 CSV
 from pathlib import Path  # 处理路径
-from typing import Any, Dict, List  # 类型提示
+from typing import Any, Dict, List, Optional  # 类型提示
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status  # FastAPI 核心组件
 from fastapi.responses import HTMLResponse, JSONResponse  # 响应类型
@@ -33,6 +35,8 @@ from app.telemetry.metrics import (  # Prometheus 指标工具
     PROMETHEUS_ENABLED,  # 指标开关
     generate_latest_metrics,  # 序列化指标函数
 )  # 导入结束
+from app.prompting import feedback as prompt_feedback  # 引入反馈模块
+from app.delivery.dispatcher import deliver_article_to_all  # 审核后触发投递
 
 LOGGER = get_logger(__name__)  # 初始化日志
 
@@ -54,6 +58,57 @@ def main_session_scope():  # 主库 Session 上下文管理器
         yield session  # 向调用方暴露 Session
     finally:
         session.close()  # 确保连接被关闭
+
+
+def _review_field_to_attr(field: str) -> str:  # 将复核字段映射到 ORM 属性
+    mapping = {
+        "body": "content",  # body 对应 content 字段
+    }
+    return mapping.get(field, field)  # 默认返回原字段
+
+
+def _normalize_patch_value(field: str, value: Any) -> Any:  # 规范化复核输入
+    if field == "tags":  # 标签允许字符串或列表
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        if isinstance(value, (list, tuple)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return None
+    if field in {"title", "summary", "body"}:  # 文本字段强制转字符串
+        return None if value is None else str(value)
+    return value
+
+
+def _value_to_text(value: Any) -> str:  # 将任意值转为比较所需的文本
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return ",".join(str(item) for item in value)
+    return str(value)
+
+
+def _calculate_edit_impact(before: Any, after: Any) -> tuple[int, float]:  # 估算编辑规模
+    before_text = _value_to_text(before)
+    after_text = _value_to_text(after)
+    if before_text == after_text:
+        return 0, 0.0
+    matcher = SequenceMatcher(None, before_text, after_text)
+    similarity = matcher.ratio()
+    ratio = max(0.0, min(1.0, 1.0 - similarity))
+    baseline = max(len(before_text), len(after_text), 1)
+    delta = int(round(baseline * ratio))
+    return delta, ratio
+
+
+def _extract_edit_ratio(diffs: Optional[dict]) -> float:  # 从 diff 聚合中提取总体幅度
+    if not isinstance(diffs, dict):
+        return 0.0
+    metrics = diffs.get("metrics") or {}
+    total_before = float(metrics.get("total_before") or 0.0)
+    total_delta = float(metrics.get("total_char_delta") or 0.0)
+    if total_before <= 0:
+        return 0.0
+    return max(0.0, min(1.0, total_delta / total_before))
 
 
 if PROMETHEUS_ENABLED:  # 当启用 Prometheus 时注册指标路由
@@ -114,6 +169,293 @@ def _collect_prompt_experiment_stats(session: Any) -> Dict[str, Any]:  # 统计 
         )  # 记录摘要
     summary.sort(key=lambda item: item["count"], reverse=True)  # 按使用次数排序
     return {"total": total, "items": summary}  # 返回聚合数据
+
+
+@app.get("/review/queue")
+def api_review_queue(
+    queue_status: str = "pending",
+    limit: int = 20,
+    offset: int = 0,
+    user=Depends(get_current_user("operator")),
+) -> Dict[str, Any]:  # 列出人工复核队列
+    """返回人工复核队列列表，支持分页。"""
+
+    if limit <= 0 or limit > 200:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid limit")
+    if offset < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid offset")
+    with main_session_scope() as session:
+        query = session.query(models.ReviewQueue)
+        if queue_status:
+            query = query.filter(models.ReviewQueue.status == queue_status)
+        total = query.count()
+        rows = (
+            query.order_by(models.ReviewQueue.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            article = row.article
+            audit = article.quality_audit if article else None
+            items.append(
+                {
+                    "id": row.id,
+                    "draft_id": row.draft_id,
+                    "title": article.title if article else None,
+                    "keyword": article.keyword if article else None,
+                    "status": row.status,
+                    "reason": row.reason,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "reviewer": row.reviewer,
+                    "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
+                    "prompt_variant": audit.prompt_variant if audit else None,
+                    "quality": (audit.scores or {}).get("overall") if audit and isinstance(audit.scores, dict) else None,
+                }
+            )
+    return {"total": total, "items": items, "limit": limit, "offset": offset}
+
+
+@app.get("/review/{review_id}")
+def api_review_detail(
+    review_id: int, user=Depends(get_current_user("operator"))
+) -> Dict[str, Any]:  # 返回单条复核详情
+    """展示人工复核详情，包括质量分与差异记录。"""
+
+    with main_session_scope() as session:
+        row = (
+            session.query(models.ReviewQueue)
+            .filter(models.ReviewQueue.id == review_id)
+            .one_or_none()
+        )
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="review not found")
+        article = row.article
+        audit = article.quality_audit if article else None
+        detail = {
+            "id": row.id,
+            "status": row.status,
+            "reason": row.reason,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "reviewer": row.reviewer,
+            "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
+            "diffs": row.diffs_json,
+            "article": {
+                "id": article.id if article else None,
+                "title": article.title if article else None,
+                "summary": article.summary if article else None,
+                "tags": article.tags if article else None,
+                "content": article.content if article else None,
+                "keyword": article.keyword if article else None,
+                "status": article.status if article else None,
+            },
+            "quality": {
+                "scores": audit.scores if audit else None,
+                "reasons": audit.reasons if audit else None,
+                "attempts": audit.attempts if audit else None,
+                "prompt_variant": audit.prompt_variant if audit else None,
+                "passed": audit.passed if audit else False,
+            },
+        }
+    return detail
+
+
+@app.post("/review/{review_id}/patch")
+def api_review_patch(
+    review_id: int,
+    payload: Dict[str, Any],
+    user=Depends(get_current_user("operator")),
+) -> Dict[str, Any]:  # 编辑草稿允许的字段
+    """允许在人工复核过程中对指定字段做小幅编辑。"""
+
+    allowed = set(settings.qa_edit_allow_fields)
+    requested = {key: payload[key] for key in payload.keys() & allowed}
+    if not requested:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no editable fields provided")
+
+    with main_session_scope() as session:
+        row = (
+            session.query(models.ReviewQueue)
+            .filter(models.ReviewQueue.id == review_id)
+            .one_or_none()
+        )
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="review not found")
+        if row.status != "pending":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="review already closed")
+        article = row.article
+        if article is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="article not found")
+
+        diffs = dict(row.diffs_json or {})
+        edits: List[Dict[str, Any]] = list(diffs.get("edits") or [])
+        metrics = dict(diffs.get("metrics") or {"total_char_delta": 0, "total_before": 0})
+        changed_entries: List[Dict[str, Any]] = []
+
+        for field, value in requested.items():
+            attr = _review_field_to_attr(field)
+            normalized = _normalize_patch_value(field, value)
+            before_value = getattr(article, attr)
+            if normalized == before_value:
+                continue
+            setattr(article, attr, normalized)
+            delta, ratio = _calculate_edit_impact(before_value, normalized)
+            baseline = max(len(_value_to_text(before_value)), 1)
+            metrics["total_char_delta"] = metrics.get("total_char_delta", 0) + delta
+            metrics["total_before"] = metrics.get("total_before", 0) + baseline
+            edit_entry = {
+                "field": field,
+                "before": before_value,
+                "after": normalized,
+                "char_delta": delta,
+                "ratio": ratio,
+                "reviewer": user.username,
+                "edited_at": datetime.utcnow().isoformat() + "Z",
+            }
+            edits.append(edit_entry)
+            changed_entries.append(edit_entry)
+
+        if not changed_entries:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="nothing changed")
+
+        diffs["edits"] = edits
+        diffs["metrics"] = metrics
+        diffs["last_editor"] = user.username
+        diffs["updated_at"] = datetime.utcnow().isoformat() + "Z"
+        row.diffs_json = diffs
+        session.commit()
+
+    return {"status": "patched", "edits": changed_entries, "diffs": diffs}
+
+
+@app.post("/review/{review_id}/approve")
+def api_review_approve(
+    review_id: int,
+    payload: Optional[Dict[str, Any]] = None,
+    user=Depends(get_current_user("operator")),
+) -> Dict[str, Any]:  # 审核通过
+    """将复核记录标记为通过，并根据配置触发投递。"""
+
+    auto_deliver = settings.qa_approve_autodeliver
+    now = datetime.utcnow()
+    variant: Optional[str] = None
+    edit_ratio = 0.0
+    total_delta = 0.0
+    with main_session_scope() as session:
+        row = (
+            session.query(models.ReviewQueue)
+            .filter(models.ReviewQueue.id == review_id)
+            .one_or_none()
+        )
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="review not found")
+        if row.status != "pending":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="review already closed")
+        article = row.article
+        if article is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="article not found")
+        audit = article.quality_audit
+        if audit:
+            variant = audit.prompt_variant
+        diffs = dict(row.diffs_json or {})
+        metrics = diffs.get("metrics") or {}
+        total_delta = float(metrics.get("total_char_delta") or 0.0)
+        edit_ratio = _extract_edit_ratio(diffs)
+
+        row.status = "approved"
+        row.reviewer = user.username
+        row.reviewed_at = now
+        article.status = "approved"
+        diffs.setdefault("decision", {})
+        diffs["decision"].update(
+            {
+                "status": "approved",
+                "reviewer": user.username,
+                "reviewed_at": now.isoformat() + "Z",
+                "auto_deliver": auto_deliver,
+            }
+        )
+        row.diffs_json = diffs
+
+        if audit:
+            audit.manual_review = False
+            audit.human_feedback = "approved"
+            audit.edit_impact = edit_ratio
+
+        delivery_result: Optional[Dict[str, Any]] = None
+        if auto_deliver:
+            try:
+                results = deliver_article_to_all(session, settings, article_id=article.id)
+                delivery_result = {platform: res.status for platform, res in results.items()}
+                diffs["decision"]["delivery_status"] = delivery_result
+            except Exception as exc:  # noqa: BLE001
+                diffs["decision"]["delivery_error"] = str(exc)
+                LOGGER.exception("auto delivery failed article_id=%s", article.id)
+
+        session.commit()
+
+    outcome = "approve_minor"
+    if edit_ratio > 0.15 or total_delta > 150:
+        outcome = "approve_major"
+    prompt_feedback.record_review_outcome(variant, outcome, edit_ratio)
+    return {
+        "status": "approved",
+        "auto_deliver": auto_deliver,
+        "edit_ratio": edit_ratio,
+        "delivery": delivery_result,
+    }
+
+
+@app.post("/review/{review_id}/reject")
+def api_review_reject(
+    review_id: int,
+    payload: Optional[Dict[str, Any]] = None,
+    user=Depends(get_current_user("operator")),
+) -> Dict[str, Any]:  # 审核驳回
+    """将复核记录标记为驳回，同时回写 Prompt 实验统计。"""
+
+    reason = (payload or {}).get("reason", "质量不达标")
+    now = datetime.utcnow()
+    variant: Optional[str] = None
+    with main_session_scope() as session:
+        row = (
+            session.query(models.ReviewQueue)
+            .filter(models.ReviewQueue.id == review_id)
+            .one_or_none()
+        )
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="review not found")
+        if row.status != "pending":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="review already closed")
+        article = row.article
+        if article is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="article not found")
+        audit = article.quality_audit
+        if audit:
+            variant = audit.prompt_variant
+            audit.manual_review = False
+            audit.human_feedback = "rejected"
+            audit.edit_impact = 1.0
+        row.status = "rejected"
+        row.reviewer = user.username
+        row.reviewed_at = now
+        article.status = "rejected"
+        diffs = dict(row.diffs_json or {})
+        diffs.setdefault("decision", {})
+        diffs["decision"].update(
+            {
+                "status": "rejected",
+                "reviewer": user.username,
+                "reviewed_at": now.isoformat() + "Z",
+                "reason": reason,
+            }
+        )
+        row.diffs_json = diffs
+        session.commit()
+
+    prompt_feedback.record_review_outcome(variant, "rejected", 1.0)
+    return {"status": "rejected", "reason": reason}
 
 
 @app.post("/api/login")  # 登录 API 路由
@@ -302,6 +644,17 @@ def page_schedules(request: Request) -> HTMLResponse:  # 调度管理页面
     """展示调度列表与操作按钮。"""  # 中文说明
 
     return TEMPLATES.TemplateResponse("schedules.html", {"request": request})  # 渲染模板
+
+
+@app.get("/review", response_class=HTMLResponse)
+def page_review(request: Request, user=Depends(get_current_user("operator"))) -> HTMLResponse:
+    """渲染人工复核工作台页面。"""
+
+    context = {
+        "request": request,
+        "auto_deliver": settings.qa_approve_autodeliver,
+    }
+    return TEMPLATES.TemplateResponse("review_queue.html", context)
 
 
 def run() -> None:  # 启动函数

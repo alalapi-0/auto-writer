@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Float,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -126,6 +127,8 @@ class ArticleDraft(Base):
     keyword: Mapped[str] = mapped_column(String(128), nullable=False)  # 对应关键词
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 草稿标题，可为空
     status: Mapped[str] = mapped_column(String(32), default="draft", nullable=False)  # 草稿状态
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)  # 摘要内容，可选
+    tags: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)  # 标签列表，使用 JSON 存储
     content: Mapped[str | None] = mapped_column(Text, nullable=True)  # 生成的正文内容
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
@@ -181,11 +184,47 @@ class ContentAudit(Base):
     passed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # 是否通过质量闸门
     fallback_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 触发回退次数
     manual_review: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # 是否进入人工复核
+    human_feedback: Mapped[str | None] = mapped_column(String(32), nullable=True)  # 人工复核结论
+    edit_impact: Mapped[float | None] = mapped_column(Float, nullable=True)  # 人工编辑幅度（0-1）
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )  # 创建时间
 
     article: Mapped[ArticleDraft] = relationship("ArticleDraft", back_populates="quality_audit")  # 反向引用文章
+
+
+class ReviewQueue(Base):
+    """人工复核队列，记录待审核的草稿及其处理状态。"""
+
+    __tablename__ = "review_queue"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键 id
+    draft_id: Mapped[int] = mapped_column(ForeignKey("articles.id"), nullable=False)  # 关联的文章草稿
+    reason: Mapped[str] = mapped_column(String(32), nullable=False)  # 入队原因，sampling 或 guard_failed
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )  # 入队时间
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)  # 当前审核状态
+    reviewer: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 审核人用户名
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 审核完成时间
+    diffs_json: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=dict)  # 审核修改记录
+
+    article: Mapped[ArticleDraft] = relationship("ArticleDraft")  # 便于直接访问文章草稿
+
+
+class PromptVariantStat(Base):
+    """存储 Prompt Variant 的动态权重与冷却信息。"""
+
+    __tablename__ = "prompt_variant_stats"
+    __table_args__ = (UniqueConstraint("variant", name="uq_prompt_variant"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键 id
+    variant: Mapped[str] = mapped_column(String(64), nullable=False)  # Prompt Variant 名称
+    weight: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)  # 当前动态权重
+    last_feedback: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 最近一次反馈时间
+    cooldown_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 冷却结束时间
+    total_approvals: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 通过次数统计
+    total_rejections: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 驳回次数统计
 
 
 class UsedPair(Base):

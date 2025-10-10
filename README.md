@@ -305,6 +305,21 @@ make run
 - Dashboard 新增 `/alerts` 只读页面，`ALERTS_PULL_ENDPOINT` 环境变量可指向 Alertmanager `api/v2/alerts` 或自建聚合服务，用于在内网浏览当前 firing/pending 告警。
 - **合规提示**：Alertmanager Webhook/SMTP 凭据必须存放在内网与密钥管理系统中，脚本默认不写入硬编码密钥；请限制告警接口只在公司 VPN 或受控子网中暴露。
 
+### 人工复核工作流
+- Dashboard 新增 `/review` 页面，需具备 `operator` 及以上角色方可访问。页面分为待审核列表与详情区，支持快速查看质量分、Prompt Variant 与命中规则。
+- 复核节点可对标题、摘要、标签与正文做小幅编辑，提交后会记录差异（字段、字符偏移、编辑人与时间）写回 `ReviewQueue.diffs_json`。
+- 操作按钮：
+  - **保存修改**：调用 `POST /review/{id}/patch`，仅允许白名单字段；
+  - **通过**：`POST /review/{id}/approve`，回写审核人、时间，并依据配置决定是否自动投递；
+  - **驳回**：`POST /review/{id}/reject`，记录原因并将草稿状态更新为 `rejected`。
+- 所有审核动作会同步至 `ContentAudit`，并调用 Prompt 反馈模块微调 Variant 权重，避免优劣 Prompt 权重震荡。
+
+### 抽检比例与自动投递配置
+- `QA_SAMPLING_RATE`：控制质量闸门通过后进入人工复核队列的抽检比例（默认 `0.2`，即 20%）。
+- `QA_EDIT_ALLOW_FIELDS`：逗号分隔或在配置文件中覆盖的字段白名单，默认 `title,tags,summary,body`。
+- `QA_APPROVE_AUTODELIVER`：布尔值，开启后复核通过会立即调用投递流程。
+- 修改上述环境变量后重新启动服务即可生效；如需运行时观测当前配置，可在 Dashboard 登录后访问 `/review` 顶部的提示或调用 `/review/queue` API。
+
 ## 11. 开发、测试与质量
 - 常用命令：
   - `make lint`：运行 Ruff 检查与格式化。
