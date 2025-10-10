@@ -1,0 +1,84 @@
+<!-- 中文注释：声明文档类型，确保浏览器按标准模式渲染。 -->
+<!DOCTYPE html>
+<!-- 中文注释：根 html 标签，设置语言为简体中文。 -->
+<html lang="zh-CN">
+  <!-- 中文注释：head 区域包含元信息与标题。 -->
+  <head>
+    <!-- 中文注释：设定字符集为 UTF-8 以支持中文显示。 -->
+    <meta charset="UTF-8" />
+    <!-- 中文注释：设置视口以适配不同分辨率。 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 中文注释：页面标题显示在窗口标签上。 -->
+    <title>Auto Writer 桌面壳</title>
+    <!-- 中文注释：简单内联样式，控制布局与加载状态。 -->
+    <style>
+      /* 中文注释：整体背景与字体设置，保持与 Dashboard 风格协调。 */
+      body {
+        margin: 0; /* 中文注释：取消默认外边距，避免出现白边。 */
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; /* 中文注释：使用系统字体保证跨平台一致性。 */
+        background: #0f172a; /* 中文注释：设置深色背景与 Dashboard 风格保持一致。 */
+        color: #e2e8f0; /* 中文注释：前景色采用浅色以提升对比度。 */
+      }
+      /* 中文注释：容器使用全屏布局承载 iframe。 */
+      .container {
+        display: flex; /* 中文注释：使用 flex 布局填充窗口空间。 */
+        flex-direction: column; /* 中文注释：子元素垂直排列以放置状态文本与 iframe。 */
+        height: 100vh; /* 中文注释：容器高度占满视窗。 */
+      }
+      /* 中文注释：加载提示居中显示友好文案。 */
+      .status {
+        flex: 1; /* 中文注释：占据剩余空间以居中显示。 */
+        display: flex; /* 中文注释：使用 flex 居中内容。 */
+        align-items: center; /* 中文注释：垂直方向居中。 */
+        justify-content: center; /* 中文注释：水平方向居中。 */
+        font-size: 18px; /* 中文注释：适中字号确保可读性。 */
+      }
+      /* 中文注释：iframe 填满剩余空间以展示 Dashboard。 */
+      iframe {
+        flex: 1; /* 中文注释：iframe 填充容器剩余空间。 */
+        border: none; /* 中文注释：移除默认边框以无缝显示。 */
+        width: 100%; /* 中文注释：宽度占满容器，避免留白。 */
+      }
+    </style>
+  </head>
+  <!-- 中文注释：body 区域包含页面结构。 -->
+  <body>
+    <!-- 中文注释：容器包裹加载提示与 Dashboard iframe。 -->
+    <div class="container">
+      <!-- 中文注释：状态文案初始提示等待服务。 -->
+      <div id="status" class="status">正在等待本地服务…</div>
+      <!-- 中文注释：iframe 默认隐藏，待健康检查通过后显示。 -->
+      <iframe id="dashboard" src="http://127.0.0.1:8787/" style="display: none;"></iframe>
+    </div>
+    <!-- 中文注释：内联脚本负责轮询后端健康状态并切换显示。 -->
+    <script>
+      // 中文注释：获取 DOM 引用以便后续操作。
+      const statusElement = document.getElementById('status');
+      const iframeElement = document.getElementById('dashboard');
+      // 中文注释：定义轮询函数，调用预加载暴露的健康检测。
+      const pollHealth = async () => {
+        // 中文注释：若预加载桥未正确注入，提示开发者检查安全隔离配置。
+        if (!window.desktopAPI || typeof window.desktopAPI.checkHealth !== 'function') {
+          statusElement.textContent = '桌面桥接初始化失败，请检查预加载脚本。';
+          return;
+        }
+        // 中文注释：尝试调用桌面 API 的健康检查。
+        const healthy = await window.desktopAPI.checkHealth();
+        if (healthy) {
+          // 中文注释：健康时隐藏提示并展示 iframe。
+          statusElement.style.display = 'none';
+          iframeElement.style.display = 'block';
+        } else {
+          // 中文注释：若仍未就绪，保持提示文案并延时重试。
+          statusElement.textContent = '正在等待本地服务…';
+          setTimeout(pollHealth, 2000);
+        }
+      };
+      // 中文注释：页面加载完成后立即开始轮询。
+      window.addEventListener('DOMContentLoaded', () => {
+        // 中文注释：首次触发健康检查流程。
+        pollHealth();
+      });
+    </script>
+  </body>
+</html>
