@@ -32,7 +32,11 @@ run-dashboard:
 
 run-scheduler:
         # 启动调度服务，加载 Profile 并注册 APScheduler 任务
-	python -m app.scheduler.service
+        python -m app.scheduler.service
+
+run-worker:
+        # 启动本地 Worker Agent 监听分发队列
+        python -m app.worker.agent --name local-agent-1
 
 add-user:
         # 通过 CLI 创建 Dashboard 用户，需指定 USER 环境变量

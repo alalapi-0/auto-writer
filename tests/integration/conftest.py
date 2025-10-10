@@ -10,6 +10,7 @@ import pytest  # 测试框架
 from sqlalchemy import create_engine, text  # 创建引擎与执行 SQL
 
 from app.db.migrate import SessionLocal, init_database, get_engine  # 导入会话工厂与初始化函数
+from app.dispatch.store import run_dispatch_migrations, SessionDispatch, get_dispatch_engine  # 分发库工具
 from config.settings import settings  # 全局配置
 
 
@@ -32,6 +33,8 @@ def temp_settings(tmp_path: Path) -> Generator[Dict[str, Path], None, None]:  # 
     orig_platforms = list(settings.delivery_enabled_platforms)  # 记录原启用平台
     orig_retry_base = settings.retry_base_seconds  # 记录原重试基础秒数
     orig_retry_max = settings.retry_max_attempts  # 记录原最大重试次数
+    orig_dispatch_url = settings.dispatch_db_url  # 记录原分发数据库 URL
+    orig_worker_token = settings.worker_auth_token  # 记录原 Worker Token
 
     settings.database.url = db_url  # 切换数据库 URL
     settings.sqlite_url = db_url  # 切换 SQLite URL
@@ -41,9 +44,13 @@ def temp_settings(tmp_path: Path) -> Generator[Dict[str, Path], None, None]:  # 
     settings.delivery_enabled_platforms = ["wechat_mp", "zhihu"]  # 启用两个投递平台
     settings.retry_base_seconds = 1  # 缩短重试间隔便于测试
     settings.retry_max_attempts = 3  # 设置较小的最大重试次数
+    settings.dispatch_db_url = f"sqlite:///{tmp_path/'dispatch.db'}"  # 重定向分发数据库
+    settings.worker_auth_token = "test-token"  # 为测试配置 Worker Token
 
     SessionLocal.configure(bind=engine)  # 重新绑定 Session 工厂
     init_database()  # 初始化数据库结构
+    SessionDispatch.configure(bind=get_dispatch_engine())  # 重绑定分发库 Session
+    run_dispatch_migrations()  # 确保分发库建表
 
     with engine.begin() as connection:  # 创建主题表以支持测试
         connection.execute(
@@ -82,6 +89,8 @@ def temp_settings(tmp_path: Path) -> Generator[Dict[str, Path], None, None]:  # 
         settings.delivery_enabled_platforms = orig_platforms  # 恢复平台列表
         settings.retry_base_seconds = orig_retry_base  # 恢复重试基础秒数
         settings.retry_max_attempts = orig_retry_max  # 恢复最大重试次数
+        settings.dispatch_db_url = orig_dispatch_url  # 恢复分发库 URL
+        settings.worker_auth_token = orig_worker_token  # 恢复 Worker Token
         SessionLocal.configure(bind=get_engine())  # 重新绑定默认引擎
         engine.dispose()  # 释放测试引擎
 

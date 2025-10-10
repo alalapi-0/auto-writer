@@ -15,6 +15,7 @@ from apscheduler.triggers.cron import CronTrigger  # Cron 触发器
 from config.settings import settings  # 引入配置
 from app.db.migrate_sched import run_migrations, sched_session_scope  # 调度数据库工具
 from app.db.models_sched import JobRun, Profile, Schedule  # ORM 模型
+from app.dispatch.service import enqueue_task  # 入队工具
 from app.profiles.loader import sync_profiles  # Profile 同步函数
 from app.telemetry.client import emit_metric  # 指标上报
 from app.telemetry.metrics import (  # Prometheus 指标埋点工具
@@ -82,7 +83,9 @@ def run_profile(profile_id: int) -> None:  # 供 APScheduler 调用的任务函�
                 LOGGER.warning("Profile 不存在或已禁用 profile_id=%s", profile_id)  # 记录警告
                 inc_run("skipped", profile_label)  # 记录一次跳过
                 return  # 直接返回
-            job = JobRun(profile_id=profile_id, status="running")  # 创建运行记录
+            dispatch_mode = profile.dispatch_mode or "queue"  # 读取调度模式
+            initial_status = "queued" if settings.worker_enable and dispatch_mode == "queue" else "running"  # 判定初始状态
+            job = JobRun(profile_id=profile_id, status=initial_status)  # 创建运行记录
             session.add(job)  # 添加记录
             session.flush()  # 刷新获取 ID
             job_id = job.id  # 保存 ID
@@ -91,6 +94,25 @@ def run_profile(profile_id: int) -> None:  # 供 APScheduler 调用的任务函�
             if profile_name:  # 若存在 profile 名称
                 profile_label = profile_name  # 使用更友好的标签
         profile_yaml = _load_profile_yaml(yaml_path)  # 加载 YAML 配置
+        dispatch_mode = profile_yaml.get("dispatch_mode", profile_yaml.get("dispatch", {}).get("mode", "queue"))  # 解析 YAML 中的调度模式
+        if profile_name:  # YAML 内优先级
+            profile_label = profile_name  # 再次同步 label
+        if settings.worker_enable and dispatch_mode == "queue":  # 当启用队列模式
+            enqueue_task(  # 调用分发服务入队
+                profile_id=profile_id,
+                payload={
+                    "job_run_id": job_id,
+                    "profile_id": profile_id,
+                    "profile_name": profile_name,
+                    "yaml_path": yaml_path,
+                    "dispatch": profile_yaml.get("dispatch", {}),
+                    "mode": profile_yaml.get("dispatch", {}).get("mode", "full"),
+                },
+                idempotency_key=f"job-{job_id}",
+            )
+            LOGGER.info("Profile 入队等待 Worker 执行 profile_id=%s job_id=%s", profile_id, job_id)  # 记录入队日志
+            inc_run("queued", profile_label)  # 记录队列指标
+            return  # 队列模式无需本地执行
         plan_payload = {"profile": profile_name, "timestamp": _now_local().isoformat()}  # 构造计划数据
         plan_payload = apply_filter_hooks("on_before_generate", plan_payload)  # 调用生成前 Hook
         article = {

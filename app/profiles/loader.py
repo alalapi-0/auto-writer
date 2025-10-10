@@ -15,6 +15,7 @@ from app.utils.logger import get_logger  # 日志工具
 LOGGER = get_logger(__name__)  # 初始化日志记录器
 
 REQUIRED_ROOT_KEYS = {"name", "generation", "delivery"}  # 定义必填顶层字段
+ALLOWED_DISPATCH_MODES = {"queue", "local"}  # 允许的调度模式集合
 
 
 def _load_yaml(path: Path) -> Dict:  # 定义内部工具函数
@@ -49,6 +50,9 @@ def validate_profile(data: Dict) -> None:  # 校验函数
     window = delivery.get("window", {})  # 获取窗口设置
     if not isinstance(window, dict) or "start" not in window or "end" not in window:  # 校验窗口
         raise ValueError("delivery.window 必须包含 start/end")  # 抛出异常
+    dispatch_mode = data.get("dispatch_mode", "queue")  # 读取调度模式
+    if dispatch_mode not in ALLOWED_DISPATCH_MODES:  # 校验模式合法性
+        raise ValueError("dispatch_mode 必须是 queue 或 local")  # 抛出异常
 
 
 def _ensure_directory() -> Path:  # 确保目录存在
@@ -71,14 +75,21 @@ def sync_profiles() -> List[Profile]:  # 同步函数
             validate_profile(data)  # 校验数据
             name = data["name"]  # 获取名称
             enabled = bool(data.get("enabled", True))  # 获取启用状态
+            dispatch_mode = data.get("dispatch_mode", "queue")  # 获取调度模式
             record = session.query(Profile).filter(Profile.name == name).one_or_none()  # 查询现有记录
             if record is None:  # 若不存在
-                record = Profile(name=name, yaml_path=str(yaml_path), is_enabled=enabled)  # 创建对象
+                record = Profile(  # 创建对象
+                    name=name,  # 设置名称
+                    yaml_path=str(yaml_path),  # 设置 YAML 路径
+                    is_enabled=enabled,  # 设置启用状态
+                    dispatch_mode=dispatch_mode,  # 设置调度模式
+                )
                 session.add(record)  # 添加到 Session
                 LOGGER.info("新增 profile name=%s", name)  # 记录日志
             else:  # 已存在
                 record.yaml_path = str(yaml_path)  # 更新路径
                 record.is_enabled = enabled  # 更新启用状态
+                record.dispatch_mode = dispatch_mode  # 更新调度模式
                 LOGGER.info("更新 profile name=%s", name)  # 记录日志
             profiles.append(record)  # 加入返回列表
     return profiles  # 返回同步结果
@@ -90,7 +101,13 @@ def list_profiles() -> List[Dict]:  # 列表函数
     with sched_session_scope() as session:  # 打开 Session
         rows = session.query(Profile).order_by(Profile.name.asc()).all()  # 查询全部
         return [  # 构造字典列表
-            {"id": row.id, "name": row.name, "yaml_path": row.yaml_path, "enabled": row.is_enabled}
+            {
+                "id": row.id,
+                "name": row.name,
+                "yaml_path": row.yaml_path,
+                "enabled": row.is_enabled,
+                "dispatch_mode": row.dispatch_mode,
+            }
             for row in rows
         ]
 
