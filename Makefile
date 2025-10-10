@@ -58,3 +58,7 @@ publish-all:
 publish-one:
 	# 仅投递单篇草稿，需指定平台与标题
 	python -m scripts.publish_one --platform $(PLATFORM) --title "$(TITLE)"
+
+run-gui:
+	# 启动 PySide6 图形界面主入口
+	python -m app.gui.main
