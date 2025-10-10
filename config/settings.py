@@ -102,6 +102,13 @@ OIDC_CLIENT_ID_DEFAULT = os.getenv("OIDC_CLIENT_ID", "")  # 新增: OIDC 客户�
 OIDC_CLIENT_SECRET_DEFAULT = os.getenv("OIDC_CLIENT_SECRET", "")  # 新增: OIDC 客户端密钥
 OIDC_REDIRECT_PATH_DEFAULT = os.getenv("OIDC_REDIRECT_PATH", "/auth/oidc/callback")  # 新增: OIDC 回调路径
 OIDC_AUTO_CREATE_VIEWER_DEFAULT = _get_env_bool("OIDC_AUTO_CREATE_VIEWER", True)  # 新增: 自动创建 viewer 用户
+WORKER_ENABLE_DEFAULT = _get_env_bool("WORKER_ENABLE", True)  # 新增: 是否启用分布式 Worker
+WORKER_AUTH_TOKEN_VALUE = os.getenv("WORKER_AUTH_TOKEN", "")  # 新增: Worker 认证令牌
+DISPATCH_DB_URL_DEFAULT = os.getenv("DISPATCH_DB_URL", "sqlite:///./.data/dispatch.db")  # 新增: 分发数据库 URL
+JOB_MAX_RETRIES_DEFAULT = _get_env_int("JOB_MAX_RETRIES", 3)  # 新增: 任务最大重试次数
+JOB_RETRY_BACKOFF_SEC_DEFAULT = _get_env_int("JOB_RETRY_BACKOFF_SEC", 30)  # 新增: 重试退避时间
+JOB_HEARTBEAT_TTL_SEC_DEFAULT = _get_env_int("JOB_HEARTBEAT_TTL_SEC", 120)  # 新增: 心跳有效期
+JOB_RUN_HARD_TIMEOUT_SEC_DEFAULT = _get_env_int("JOB_RUN_HARD_TIMEOUT_SEC", 1800)  # 新增: 任务硬超时时间
 
 
 class ConfigError(Exception):
@@ -186,6 +193,13 @@ class Settings:
     sched_enable: bool = SCHED_ENABLE_DEFAULT  # 新增: 是否启用调度服务
     sched_max_parallel: int = SCHED_MAX_PARALLEL_DEFAULT  # 新增: 单 Profile 并行度
     sched_db_url: str = SCHED_DB_URL_DEFAULT  # 新增: 调度数据库 URL
+    worker_enable: bool = WORKER_ENABLE_DEFAULT  # 新增: 是否启用分布式 Worker
+    worker_auth_token: str = WORKER_AUTH_TOKEN_VALUE  # 新增: Worker 认证令牌
+    dispatch_db_url: str = DISPATCH_DB_URL_DEFAULT  # 新增: 分发数据库连接串
+    job_max_retries: int = JOB_MAX_RETRIES_DEFAULT  # 新增: 任务最大重试次数
+    job_retry_backoff_sec: int = JOB_RETRY_BACKOFF_SEC_DEFAULT  # 新增: 退避秒数
+    job_heartbeat_ttl_sec: int = JOB_HEARTBEAT_TTL_SEC_DEFAULT  # 新增: 心跳有效期
+    job_run_hard_timeout_sec: int = JOB_RUN_HARD_TIMEOUT_SEC_DEFAULT  # 新增: 任务硬超时时长
     profiles_dir: str = PROFILES_DIR_DEFAULT  # 新增: Profile YAML 目录
     plugins_dir: str = PLUGINS_DIR_DEFAULT  # 新增: 插件目录
     plugins_enabled: str = PLUGINS_ENABLED_DEFAULT  # 新增: 插件启用配置

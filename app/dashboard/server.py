@@ -19,6 +19,8 @@ from app.auth.security import (  # 鉴权工具
 from app.auth.oidc import router as oidc_router  # 引入 OIDC 路由
 from app.db.migrate_sched import run_migrations, sched_session_scope  # 调度数据库工具
 from app.db.models_sched import JobRun, MetricEvent, Schedule, User  # ORM 模型
+from app.dispatch.api import router as dispatch_router  # 分发队列路由
+from app.dispatch.store import run_dispatch_migrations  # 分发库迁移
 from app.scheduler.api import list_schedules, pause_schedule, resume_schedule, run_now  # 调度控制
 from app.utils.logger import get_logger  # 日志工具
 from app.telemetry.metrics import (  # Prometheus 指标工具
@@ -33,6 +35,7 @@ app = FastAPI(title="AutoWriter Dashboard")  # 创建 FastAPI 应用
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))  # 模板目录
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")  # 挂载静态目录
 app.include_router(oidc_router)  # 注册 OIDC 相关路由
+app.include_router(dispatch_router)  # 注册分发队列路由
 
 
 if PROMETHEUS_ENABLED:  # 当启用 Prometheus 时注册指标路由
@@ -50,6 +53,7 @@ async def on_startup() -> None:  # 启动事件
     """确保调度数据库存在并同步 Profile。"""  # 中文说明
 
     run_migrations()  # 执行迁移
+    run_dispatch_migrations()  # 确保分发数据库建表
 
 
 @app.get("/healthz")  # 健康检查路由
