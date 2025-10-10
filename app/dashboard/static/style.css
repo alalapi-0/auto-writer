@@ -7,3 +7,6 @@ button:hover { background: #1d4ed8; } /* 按钮 hover 效果 */
 table { width: 100%; border-collapse: collapse; margin-top: 1rem; } /* 表格样式 */
 th, td { border: 1px solid #e5e7eb; padding: 0.5rem; text-align: left; } /* 单元格样式 */
 th { background: #f1f5f9; } /* 表头背景 */
+.heartbeat-item { padding: 0.25rem 0; color: #334155; } /* 心跳条目基础样式 */
+.heartbeat-item.offline { color: #dc2626; font-weight: 600; } /* 心跳超时高亮红色 */
+.dead-letter-item { padding: 0.25rem 0; border-bottom: 1px solid #e5e7eb; color: #475569; } /* 死信条目样式 */

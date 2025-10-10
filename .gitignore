@@ -31,6 +31,7 @@ reports/
 logs/screenshots/
 logs/traces/
 .data/
+outbox_quarantine/
 profiles/*.yml
 !profiles/default.yml
 !profiles/psy_film.yml

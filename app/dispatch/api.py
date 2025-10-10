@@ -153,4 +153,5 @@ def dispatch_summary() -> Dict[str, Any]:  # 队列统计处理函数
 
     stats = service.get_queue_stats()  # 获取队列统计
     heartbeats = service.list_heartbeats()  # 获取心跳
-    return {"queue": stats, "heartbeats": heartbeats}  # 返回综合信息
+    dead_letters = service.list_dead_letters()  # 获取死信任务
+    return {"queue": stats, "heartbeats": heartbeats, "dead_letters": dead_letters}  # 返回综合信息

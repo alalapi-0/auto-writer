@@ -9,11 +9,14 @@ from typing import Dict, Iterable, List, Optional, Tuple  # 类型提示
 
 from sqlalchemy import text  # 执行原生 SQL
 from sqlalchemy.orm import Session  # SQLAlchemy 会话类型
+from tenacity import RetryError, retry, stop_after_attempt, wait_random_exponential  # 引入重试控制
 
 from app.delivery.types import DeliveryResult  # 投递结果结构
 from app.delivery.wechat_mp_playwright import deliver_via_playwright as deliver_wechat  # 公众号投递
 from app.delivery.zhihu_playwright import deliver_via_playwright as deliver_zhihu  # 知乎投递
 from app.utils.logger import get_logger  # 日志工具
+from app.telemetry.client import emit_metric  # 指标事件上报
+from app.telemetry.metrics import inc_delivery  # Prometheus 投递指标
 
 LOGGER = get_logger(__name__)  # 初始化日志器
 
@@ -61,6 +64,57 @@ def _load_payload(raw) -> Optional[Dict]:
         return json.loads(raw)
     except Exception:  # noqa: BLE001
         return None
+
+
+def _call_adapter_with_retry(adapter, payload: Dict[str, object], settings) -> DeliveryResult:
+    """统一封装外部调用的重试逻辑。"""
+
+    @retry(
+        stop=stop_after_attempt(settings.job_max_retries),
+        wait=wait_random_exponential(
+            multiplier=settings.job_retry_backoff_sec, max=settings.job_retry_backoff_sec * 10
+        ),
+        reraise=True,
+    )
+    def _invoke() -> DeliveryResult:
+        return adapter(payload, settings)
+
+    return _invoke()
+
+
+def _find_duplicate_log(db: Session, article: Dict, platform: str) -> Optional[Dict]:
+    """检查相同标题与角色在当日是否已有投递记录。"""
+
+    title = article.get("title")
+    character = article.get("character_name")
+    work = article.get("work")
+    created_at = _coerce_datetime(article.get("created_at"))
+    if not all([title, character, work, created_at]):
+        return None
+    stmt = text(
+        """
+        SELECT pl.*
+        FROM platform_logs pl
+        JOIN articles a ON pl.article_id = a.id
+        WHERE pl.platform = :platform
+          AND a.title = :title
+          AND a.character_name = :character
+          AND a.work = :work
+          AND DATE(pl.created_at) = :day
+        LIMIT 1
+        """
+    )
+    row = db.execute(
+        stmt,
+        {
+            "platform": platform,
+            "title": title,
+            "character": character,
+            "work": work,
+            "day": created_at.date().isoformat(),
+        },
+    ).mappings().first()
+    return dict(row) if row else None
 
 
 def _next_retry(settings, attempt: int) -> Optional[datetime]:
@@ -230,6 +284,26 @@ def publish_one(
     if not article:
         raise ValueError(f"数据库中未找到标题为 {title} 的文章")
     out_path = _find_out_dir(platform, title, settings, day, out_dir)
+    duplicate_log = _find_duplicate_log(db, article, platform)  # 查重是否已投递
+    if duplicate_log:  # 命中重复
+        LOGGER.info(
+            "publish_duplicate_skip",
+            platform=platform,
+            article_id=article.get("id"),
+            log_id=duplicate_log.get("id"),
+        )
+        emit_metric("delivery", "duplicate_skip", 1, platform=platform)  # 记录重复指标
+        payload = _load_payload(duplicate_log.get("payload"))  # 还原历史 payload
+        status = duplicate_log.get("status") or "skipped"  # 恢复历史状态
+        inc_delivery(platform, status)  # Prometheus 记录重复命中
+        return DeliveryResult(  # 返回历史记录
+            platform=platform,
+            status=status,
+            target_id=duplicate_log.get("target_id"),
+            out_dir=str(out_path),
+            payload=payload,
+            error=duplicate_log.get("last_error"),
+        )
     with db.begin():
         log_row, can_run = _ensure_platform_log(db, settings, article["id"], platform)
         if not can_run:
@@ -244,7 +318,26 @@ def publish_one(
             )
         _update_run_status(db, article.get("run_id"), "delivering")
     start_time = time.time()
-    result = adapter({"title": title, "out_dir": str(out_path)}, settings)
+    try:
+        result = _call_adapter_with_retry(
+            adapter, {"title": title, "out_dir": str(out_path)}, settings
+        )
+    except RetryError as exc:  # 捕获重试耗尽
+        last_exc = exc.last_attempt.exception() if exc.last_attempt else exc  # 获取最终异常
+        LOGGER.error(
+            "playwright_publish_fail",
+            platform=platform,
+            title=title,
+            error=str(last_exc),
+        )
+        result = DeliveryResult(  # 构造失败结果
+            platform=platform,
+            status="failed",
+            target_id=None,
+            out_dir=str(out_path),
+            payload={"retry_attempts": exc.last_attempt.attempt_number if exc.last_attempt else settings.job_max_retries},
+            error=str(last_exc),
+        )
     duration = time.time() - start_time
     LOGGER.info(
         "playwright_publish_one",
@@ -253,6 +346,11 @@ def publish_one(
         status=result.status,
         duration=duration,
     )
+    if result.status in SUCCESS_STATES:  # 成功路径
+        emit_metric("delivery", "platform_success", 1, platform=platform)  # 记录成功指标
+    else:  # 失败或跳过
+        emit_metric("delivery", "platform_failed", 1, platform=platform)  # 记录失败指标
+    inc_delivery(platform, result.status)  # 更新 Prometheus 指标
     with db.begin():
         _persist_platform_result(db, settings, log_row, result)
         if result.status == "success":

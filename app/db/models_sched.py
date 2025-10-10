@@ -2,9 +2,10 @@
 
 from __future__ import annotations  # 启用未来注解语法
 
-from datetime import datetime  # 处理时间字段
+from datetime import datetime, date  # 处理时间字段与日期列
 from sqlalchemy import (  # 引入 SQLAlchemy 类型与约束工具
     Boolean,  # 布尔值列
+    Date,  # 日期列用于记录运行日期
     DateTime,  # 日期时间列
     ForeignKey,  # 外键约束
     Index,  # 普通索引构造器
@@ -93,6 +94,9 @@ class JobRun(SchedBase):  # 运行记录表
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键 ID
     profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id"), nullable=False)  # 关联 Profile
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)  # 新增: 幂等键
+    run_date: Mapped[date] = mapped_column(Date, nullable=False)  # 新增: 运行日期
+    batch_no: Mapped[str] = mapped_column(String(32), default="default", nullable=False)  # 新增: 批次编号
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)  # 开始时间
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 结束时间
     status: Mapped[str] = mapped_column(String(16), default="running", nullable=False)  # 状态
@@ -170,6 +174,7 @@ class PluginRegistry(SchedBase, TimestampMixin):  # 插件注册表
 Index("idx_schedule_profile", Schedule.profile_id)  # 为调度表添加 Profile 维度索引
 Index("idx_jobrun_started", JobRun.started_at)  # JobRun 开始时间索引
 Index("idx_jobrun_profile", JobRun.profile_id)  # JobRun Profile 索引
+Index("idx_jobrun_date", JobRun.run_date)  # 新增: JobRun 运行日期索引
 Index(
     "idx_taskqueue_status_available",
     TaskQueue.status,
