@@ -5,10 +5,12 @@ from typing import Any, Dict, Optional  # 引入类型提示增强可读性
 from sqlalchemy import text  # 导入 SQL 构造器用于执行原生语句
 from sqlalchemy.orm import Session  # 引入 SQLAlchemy 会话类型
 from app.dedup.deduplicator import decide_dedup, DedupConfig  # 导入去重判定逻辑与配置
+from app.chaos.hooks import maybe_inject_chaos  # 引入混沌注入钩子
 
 
 def insert_article_tx(session: Session, title: str, body: str, role: str, work: str, keyword: str, lang: str = "zh", run_id: Optional[str] = None) -> Dict[str, Any]:  # 定义事务性插入函数
     """执行去重判定并在单个事务内写入 articles 与 used_pairs。"""  # 函数中文文档
+    maybe_inject_chaos("generation.persist")  # 持久化阶段触发混沌演练
     now = datetime.now(timezone.utc)  # 获取当前 UTC 时间
     cfg = DedupConfig()  # 初始化默认去重配置
     verdict = decide_dedup(session, title, body, role, work, keyword, lang, now, cfg)  # 执行去重判定

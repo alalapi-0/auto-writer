@@ -11,6 +11,8 @@ from tenacity import RetryError, retry, stop_after_attempt, wait_random_exponent
 
 from app.utils.logger import get_logger  # 引入统一日志模块
 
+from app.chaos.hooks import maybe_inject_chaos  # 引入混沌注入钩子
+from app.delivery.base import BaseDeliveryAdapter  # 引入限速控制工具
 from app.delivery.registry import get_registry  # 加载适配器注册表
 from app.delivery.types import DeliveryResult  # 引入统一返回结构
 from app.plugins.loader import run_exporter_hook  # 引入插件导出 Hook
@@ -214,6 +216,8 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                 error=log.get("last_error") if log else None,
             )
             continue  # 处理下个平台
+        BaseDeliveryAdapter.guard_rate_limit_for_platform(platform)  # 在调用前执行限速控制
+        maybe_inject_chaos(f"delivery.dispatch.{platform}")  # 在投递前触发混沌钩子
         try:
             LOGGER.info(  # 记录本次平台投递开始
                 "执行平台投递 article_id=%s platform=%s attempt=%s",

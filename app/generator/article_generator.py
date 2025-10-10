@@ -13,6 +13,7 @@ from sqlalchemy import text  # TODO: 引入 text 以执行原生 SQL
 from sqlalchemy.orm import Session  # 类型提示，便于静态检查
 
 from config.settings import BASE_DIR, settings  # TODO: 引入 settings 读取软锁配置
+from app.chaos.hooks import maybe_inject_chaos  # 引入混沌注入钩子
 from app.db.migrate import SessionLocal  # 数据库会话工厂
 from app.generator import character_selector  # 角色选择工具模块
 from app.prompting.registry import (  # Prompt 选择工具
@@ -211,6 +212,7 @@ class ArticleGenerator:
     ) -> Dict[str, Any]:
         """根据主题生成文章草稿。"""
 
+        maybe_inject_chaos("generation.generate_article")  # 生成阶段触发混沌演练
         template = self._load_prompt_template()  # 加载提示词模板
         theme = self._acquire_theme()  # 获取未使用的心理学主题
         character_profile = character_selector.get_random_character()  # 随机抽取角色资料

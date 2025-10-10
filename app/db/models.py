@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime, date  # 处理时间字段
+from typing import Optional  # 引入 Optional 以支持可空关系类型
 
 from sqlalchemy import (
     Boolean,
@@ -138,7 +139,7 @@ class ArticleDraft(Base):
     platform_logs: Mapped[list["PlatformLog"]] = relationship(
         back_populates="article", cascade="all, delete-orphan"
     )  # 关联平台投递记录
-    quality_audit: Mapped["ContentAudit" | None] = relationship(
+    quality_audit: Mapped[Optional["ContentAudit"]] = relationship(
         back_populates="article", cascade="all, delete-orphan", uselist=False
     )  # 新增: 关联质量闸门记录，一篇文章对应一条审计
 

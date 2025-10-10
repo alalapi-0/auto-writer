@@ -123,6 +123,20 @@ JOB_MAX_RETRIES_DEFAULT = _get_env_int("JOB_MAX_RETRIES", 3)  # 新增: 任务�
 JOB_RETRY_BACKOFF_SEC_DEFAULT = _get_env_int("JOB_RETRY_BACKOFF_SEC", 30)  # 新增: 重试退避时间
 JOB_HEARTBEAT_TTL_SEC_DEFAULT = _get_env_int("JOB_HEARTBEAT_TTL_SEC", 120)  # 新增: 心跳有效期
 JOB_RUN_HARD_TIMEOUT_SEC_DEFAULT = _get_env_int("JOB_RUN_HARD_TIMEOUT_SEC", 1800)  # 新增: 任务硬超时时间
+DELIVERY_RATE_LIMIT_PER_PLATFORM = {  # 新增: 平台级限速配置字典
+    "wechat": 3,  # 微信平台默认每分钟最多 3 次
+    "zhihu": 4,  # 知乎平台默认每分钟最多 4 次
+}  # 字典定义结束
+DELIVERY_JITTER_SEC = [3, 12]  # 新增: 每次投递前的随机抖动区间（秒）
+DELIVERY_TIME_WINDOWS = {  # 新增: 平台投递允许的时间窗配置
+    "wechat": ["06:30-08:30", "20:00-22:30"],  # 微信公众号允许的投递时间段
+    "zhihu": ["07:00-09:00", "19:00-23:00"],  # 知乎允许的投递时间段
+}  # 时间窗字典定义结束
+CHAOS_ENABLE_DEFAULT = _get_env_bool("CHAOS_ENABLE", False)  # 新增: 混沌注入开关默认值
+CHAOS_PROB_DEFAULT = float(os.getenv("CHAOS_PROB", 0.05))  # 新增: 混沌注入概率默认值
+CHAOS_TYPES_DEFAULT = os.getenv(  # 新增: 混沌注入可选类型默认值
+    "CHAOS_TYPES", "latency,error,drop"  # 默认包括延迟、错误与丢弃三种
+).split(",")  # 解析为列表
 
 
 class ConfigError(Exception):
@@ -249,6 +263,15 @@ class Settings:
     delivery_enabled_platforms: List[str] = field(  # 新增: 平台开关列表字段
         default_factory=list  # 新增: 默认使用空列表占位
     )
+    delivery_rate_limit_per_platform: dict[str, int] = field(  # 新增: 平台限速配置
+        default_factory=lambda: dict(DELIVERY_RATE_LIMIT_PER_PLATFORM)  # 新增: 复制默认字典
+    )
+    delivery_jitter_sec: List[int] = field(  # 新增: 投递前随机抖动区间
+        default_factory=lambda: list(DELIVERY_JITTER_SEC)  # 新增: 拷贝默认数组
+    )
+    delivery_time_windows: dict[str, List[str]] = field(  # 新增: 平台时间窗配置
+        default_factory=lambda: {k: list(v) for k, v in DELIVERY_TIME_WINDOWS.items()}  # 新增: 深复制默认值
+    )
     outbox_dir: str = "./outbox"  # 新增: 草稿输出目录默认值
     outbox_quarantine_dir: str = "./outbox_quarantine"  # 新增: 草稿隔离目录默认值
     retry_base_seconds: int = 300  # 新增: 重试基础秒数默认值
@@ -267,6 +290,11 @@ class Settings:
         default_factory=lambda: list(QA_EDIT_ALLOW_FIELDS)
     )
     qa_approve_autodeliver: bool = QA_APPROVE_AUTODELIVER  # 新增: 审核通过是否自动投递
+    chaos_enable: bool = CHAOS_ENABLE_DEFAULT  # 新增: 混沌注入开关
+    chaos_prob: float = CHAOS_PROB_DEFAULT  # 新增: 混沌注入概率
+    chaos_types: List[str] = field(  # 新增: 混沌注入类型列表
+        default_factory=lambda: [item.strip() for item in CHAOS_TYPES_DEFAULT if item.strip()]  # 新增: 去除空白
+    )
 
     # === 保持原有字段 ===
     database: DatabaseConfig = field(
@@ -422,6 +450,9 @@ def get_settings() -> Settings:
         wp_user=os.getenv("WP_USER"),
         wp_app_pass=os.getenv("WP_APP_PASS"),
         delivery_enabled_platforms=list(DELIVERY_ENABLED_PLATFORMS),  # 新增: 注入平台开关配置
+        delivery_rate_limit_per_platform=dict(DELIVERY_RATE_LIMIT_PER_PLATFORM),  # 新增: 注入限速配置
+        delivery_jitter_sec=list(DELIVERY_JITTER_SEC),  # 新增: 注入抖动配置
+        delivery_time_windows={k: list(v) for k, v in DELIVERY_TIME_WINDOWS.items()},  # 新增: 注入时间窗配置
         outbox_dir=OUTBOX_DIR,  # 新增: 注入 outbox 目录
         outbox_quarantine_dir=OUTBOX_QUARANTINE_DIR,  # 新增: 注入隔离目录
         retry_base_seconds=RETRY_BASE_SECONDS,  # 新增: 注入重试基础秒数
@@ -440,6 +471,9 @@ def get_settings() -> Settings:
         qa_sampling_rate=QA_SAMPLING_RATE,  # 新增: 注入抽检比例
         qa_edit_allow_fields=list(QA_EDIT_ALLOW_FIELDS),  # 新增: 注入可编辑字段
         qa_approve_autodeliver=QA_APPROVE_AUTODELIVER,  # 新增: 注入自动投递策略
+        chaos_enable=CHAOS_ENABLE_DEFAULT,  # 新增: 注入混沌开关
+        chaos_prob=CHAOS_PROB_DEFAULT,  # 新增: 注入混沌概率
+        chaos_types=[item.strip() for item in CHAOS_TYPES_DEFAULT if item.strip()],  # 新增: 注入混沌类型
     )
 
     return settings_obj

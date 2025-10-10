@@ -25,7 +25,7 @@ class MediumDeliveryAdapter(BaseDeliveryAdapter):
 
         self.token = token  # 存储 Medium API Token，真实场景需用户填写
 
-    def deliver(self, article: Dict[str, str]) -> None:
+    def _deliver(self, article: Dict[str, str]) -> None:
         """调用 Medium API 创建草稿。
 
         真实请求示例（POST https://api.medium.com/v1/users/{userId}/posts）：

@@ -25,7 +25,7 @@ class WordPressDeliveryAdapter(BaseDeliveryAdapter):
         self.username = username  # 存储用户名供 Basic Auth 使用
         self.password = password  # 存储密码，建议后续使用应用专用密码
 
-    def deliver(self, article: Dict[str, str]) -> None:
+    def _deliver(self, article: Dict[str, str]) -> None:
         """模拟调用 WordPress REST 接口。
 
         真实请求示例（POST https://example.com/wp-json/wp/v2/posts）：
