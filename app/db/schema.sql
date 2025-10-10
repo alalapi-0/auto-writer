@@ -69,10 +69,24 @@ CREATE TABLE IF NOT EXISTS platform_logs (
     attempt_count INTEGER NOT NULL DEFAULT 0, -- 新增: 记录尝试次数
     last_error TEXT, -- 新增: 保存最近一次错误
     next_retry_at TIMESTAMP, -- 新增: 预约下次重试时间
+    prompt_variant VARCHAR(64), -- 新增: 记录 Prompt 版本
     payload JSON, -- 新增: 序列化存档
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS ix_platform_logs_next_retry ON platform_logs(next_retry_at); -- 新增: 便于扫描到期任务
+
+CREATE TABLE IF NOT EXISTS content_audits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    prompt_variant VARCHAR(64),
+    scores JSON NOT NULL DEFAULT (json_object()),
+    reasons JSON NOT NULL DEFAULT (json_array()),
+    attempts JSON NOT NULL DEFAULT (json_array()),
+    passed BOOLEAN NOT NULL DEFAULT 0,
+    fallback_count INTEGER NOT NULL DEFAULT 0,
+    manual_review BOOLEAN NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TABLE IF NOT EXISTS used_pairs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

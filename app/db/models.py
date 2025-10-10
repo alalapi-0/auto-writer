@@ -135,6 +135,9 @@ class ArticleDraft(Base):
     platform_logs: Mapped[list["PlatformLog"]] = relationship(
         back_populates="article", cascade="all, delete-orphan"
     )  # 关联平台投递记录
+    quality_audit: Mapped["ContentAudit" | None] = relationship(
+        back_populates="article", cascade="all, delete-orphan", uselist=False
+    )  # 新增: 关联质量闸门记录，一篇文章对应一条审计
 
 
 class PlatformLog(Base):
@@ -155,12 +158,34 @@ class PlatformLog(Base):
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 新增: 尝试次数
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)  # 新增: 最近一次错误描述
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 新增: 下次重试时间
+    prompt_variant: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 新增: 记录投递时使用的 Prompt 版本
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # 新增: 存档投递材料
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )  # 记录时间
 
     article: Mapped[ArticleDraft] = relationship("ArticleDraft", back_populates="platform_logs")  # 反向引用
+
+
+class ContentAudit(Base):
+    """存储质量闸门的打分结果与复核状态。"""
+
+    __tablename__ = "content_audits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)  # 主键 id
+    article_id: Mapped[int] = mapped_column(ForeignKey("articles.id"), nullable=False)  # 关联文章草稿
+    prompt_variant: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 使用的 Prompt Variant
+    scores: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)  # 指标得分 JSON
+    reasons: Mapped[list] = mapped_column(JSON, nullable=False, default=list)  # 未通过原因列表
+    attempts: Mapped[list] = mapped_column(JSON, nullable=False, default=list)  # 尝试记录，包含每轮 Variant
+    passed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # 是否通过质量闸门
+    fallback_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 触发回退次数
+    manual_review: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # 是否进入人工复核
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )  # 创建时间
+
+    article: Mapped[ArticleDraft] = relationship("ArticleDraft", back_populates="quality_audit")  # 反向引用文章
 
 
 class UsedPair(Base):

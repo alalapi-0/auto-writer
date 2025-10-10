@@ -2,8 +2,11 @@
 
 from __future__ import annotations  # 启用未来注解语法
 
+import csv  # 导出 CSV
+from contextlib import contextmanager  # 提供主库 Session 上下文
+from io import StringIO  # 构建内存 CSV
 from pathlib import Path  # 处理路径
-from typing import Any  # 类型提示
+from typing import Any, Dict, List  # 类型提示
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status  # FastAPI 核心组件
 from fastapi.responses import HTMLResponse, JSONResponse  # 响应类型
@@ -17,7 +20,9 @@ from app.auth.security import (  # 鉴权工具
     verify_password,
 )
 from app.auth.oidc import router as oidc_router  # 引入 OIDC 路由
+from app.db.migrate import SessionLocal as MainSessionLocal  # 主业务库会话工厂
 from app.db.migrate_sched import run_migrations, sched_session_scope  # 调度数据库工具
+from app.db import models  # 主业务库 ORM 模型
 from app.db.models_sched import JobRun, MetricEvent, Schedule, User  # ORM 模型
 from app.dispatch.api import router as dispatch_router  # 分发队列路由
 from app.dispatch.store import run_dispatch_migrations  # 分发库迁移
@@ -38,6 +43,17 @@ app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")
 app.include_router(oidc_router)  # 注册 OIDC 相关路由
 app.include_router(dispatch_router)  # 注册分发队列路由
 app.include_router(alerts_router)  # 注册告警面板路由
+
+
+@contextmanager
+def main_session_scope():  # 主库 Session 上下文管理器
+    """提供与业务数据库交互的上下文，确保连接正确释放。"""
+
+    session = MainSessionLocal()
+    try:
+        yield session  # 向调用方暴露 Session
+    finally:
+        session.close()  # 确保连接被关闭
 
 
 if PROMETHEUS_ENABLED:  # 当启用 Prometheus 时注册指标路由
@@ -63,6 +79,41 @@ def healthz() -> dict[str, str]:  # 健康检查
     """返回简单的健康状态。"""  # 中文说明
 
     return {"status": "ok"}  # 健康状态
+
+
+def _collect_prompt_experiment_stats(session: Any) -> Dict[str, Any]:  # 统计 Prompt 实验数据
+    """聚合 ContentAudit 表中各 Variant 的表现。"""  # 中文说明
+
+    audits: List[models.ContentAudit] = session.query(models.ContentAudit).all()  # 查询全部审计记录
+    total = len(audits)  # 计算总量
+    buckets: Dict[str, Dict[str, Any]] = {}  # 初始化聚合桶
+    for audit in audits:  # 遍历记录
+        variant = audit.prompt_variant or "unknown"  # 缺省命名为 unknown
+        bucket = buckets.setdefault(variant, {"count": 0, "scores": [], "fallback": 0})  # 获取桶
+        bucket["count"] += 1  # 累计次数
+        overall = None
+        if isinstance(audit.scores, dict):  # 安全读取 overall 分数
+            overall = audit.scores.get("overall")
+        if isinstance(overall, (int, float)):  # 仅记录数值型分数
+            bucket["scores"].append(float(overall))
+        bucket["fallback"] += audit.fallback_count  # 累加失败切换次数
+    summary: List[Dict[str, Any]] = []  # 汇总结果
+    for variant, info in buckets.items():  # 遍历聚合结果
+        count = info["count"]
+        hit_rate = count / total if total else 0.0  # 计算命中率
+        avg_score = sum(info["scores"]) / len(info["scores"]) if info["scores"] else 0.0  # 平均质量分
+        avg_fallback = info["fallback"] / count if count else 0.0  # 平均失败切换次数
+        summary.append(
+            {
+                "variant": variant,
+                "count": count,
+                "hit_rate": hit_rate,
+                "avg_quality": avg_score,
+                "avg_fallback": avg_fallback,
+            }
+        )  # 记录摘要
+    summary.sort(key=lambda item: item["count"], reverse=True)  # 按使用次数排序
+    return {"total": total, "items": summary}  # 返回聚合数据
 
 
 @app.post("/api/login")  # 登录 API 路由
@@ -105,6 +156,38 @@ def api_runs(limit: int = 20, user=Depends(get_current_user("viewer"))) -> dict[
             for row in rows
         ]  # 组装数据
     return {"items": data}  # 返回 JSON
+
+
+@app.get("/api/prompt-experiments")  # Prompt 实验数据路由
+def api_prompt_experiments(user=Depends(get_current_user("viewer"))) -> Dict[str, Any]:  # Prompt 实验 API
+    """返回各 Prompt Variant 的命中率与质量评分。"""  # 中文说明
+
+    with main_session_scope() as session:  # 打开主库 Session
+        return _collect_prompt_experiment_stats(session)  # 计算并返回
+
+
+@app.get("/api/prompt-experiments/export")  # Prompt 实验 CSV 导出
+def api_prompt_experiments_export(user=Depends(get_current_user("viewer"))) -> Response:  # Prompt 导出 API
+    """将 Prompt 实验统计导出为 CSV。"""  # 中文说明
+
+    with main_session_scope() as session:  # 打开主库 Session
+        data = _collect_prompt_experiment_stats(session)  # 聚合数据
+    buffer = StringIO()  # 准备内存缓冲
+    writer = csv.writer(buffer)  # 构造 CSV writer
+    writer.writerow(["variant", "hit_rate", "avg_quality", "avg_fallback", "count"])  # 写入表头
+    for item in data["items"]:  # 遍历每个 Variant
+        writer.writerow(
+            [
+                item["variant"],
+                f"{item['hit_rate']:.2%}",
+                f"{item['avg_quality']:.2f}",
+                f"{item['avg_fallback']:.2f}",
+                item["count"],
+            ]
+        )  # 写入数据行
+    response = Response(content=buffer.getvalue(), media_type="text/csv")  # 构造响应
+    response.headers["Content-Disposition"] = "attachment; filename=prompt_experiments.csv"  # 设置下载文件名
+    return response
 
 
 @app.get("/api/schedules")  # 调度列表路由
@@ -198,6 +281,13 @@ def page_index(request: Request) -> HTMLResponse:  # 总览页面
     """渲染仪表盘首页，使用前端 fetch 调用 API。"""  # 中文说明
 
     return TEMPLATES.TemplateResponse("index.html", {"request": request})  # 渲染模板
+
+
+@app.get("/prompt-experiments", response_class=HTMLResponse)  # Prompt 实验页面
+def page_prompt_experiments(request: Request, user=Depends(get_current_user("viewer"))) -> HTMLResponse:  # 页面入口
+    """渲染 Prompt 实验展示页面。"""  # 中文说明
+
+    return TEMPLATES.TemplateResponse("prompt_experiments.html", {"request": request})  # 渲染模板
 
 
 @app.get("/runs", response_class=HTMLResponse)  # 运行列表页面路由

@@ -46,6 +46,7 @@ def persist_results(session: Session, run: models.Run, result: dict) -> List[str
         session.add(draft)  # 写入草稿
         session.flush()  # 刷新以获得草稿 ID
 
+        audit_payload = article_payload.get("quality_audit") or {}  # 读取质量审计信息
         for platform_result in article_payload.get("platform_results", []):  # 处理平台投递日志
             log = models.PlatformLog(
                 article_id=draft.id,
@@ -57,9 +58,25 @@ def persist_results(session: Session, run: models.Run, result: dict) -> List[str
                 error=platform_result.get("error"),
                 attempt_count=1,  # 新增: 默认首轮尝试次数
                 last_error=platform_result.get("error"),  # 新增: 同步最近错误
+                prompt_variant=platform_result.get("variant")
+                or article_payload.get("prompt_variant")
+                or audit_payload.get("variant"),  # 新增: 记录 Prompt 版本
                 payload=platform_result,  # 新增: 存档原始返回数据
             )
             session.add(log)  # 写入平台日志
+
+        if audit_payload:  # 当存在质量闸门信息时写入审计表
+            audit_record = models.ContentAudit(
+                article_id=draft.id,
+                prompt_variant=audit_payload.get("variant"),
+                scores=audit_payload.get("scores") or {},
+                reasons=audit_payload.get("reasons") or [],
+                attempts=audit_payload.get("attempts") or [],
+                passed=bool(audit_payload.get("passed")),
+                fallback_count=int(audit_payload.get("fallback_count") or 0),
+                manual_review=bool(article_payload.get("manual_review")),
+            )
+            session.add(audit_record)
 
         used_pair = models.UsedPair(  # 构造 used_pairs 记录
             character_name=draft.character_name,
