@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS articles (
     keyword VARCHAR(128) NOT NULL,
     title VARCHAR(255),
     status VARCHAR(32) NOT NULL DEFAULT 'draft',
+    summary TEXT,
+    tags JSON,
     content TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -85,7 +87,31 @@ CREATE TABLE IF NOT EXISTS content_audits (
     passed BOOLEAN NOT NULL DEFAULT 0,
     fallback_count INTEGER NOT NULL DEFAULT 0,
     manual_review BOOLEAN NOT NULL DEFAULT 0,
+    human_feedback VARCHAR(32),
+    edit_impact REAL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS review_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    draft_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    reason VARCHAR(32) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    reviewer VARCHAR(64),
+    reviewed_at TIMESTAMP,
+    diffs_json JSON DEFAULT (json_object())
+);
+
+CREATE TABLE IF NOT EXISTS prompt_variant_stats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    variant VARCHAR(64) NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    last_feedback TIMESTAMP,
+    cooldown_until TIMESTAMP,
+    total_approvals INTEGER NOT NULL DEFAULT 0,
+    total_rejections INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT uq_prompt_variant UNIQUE (variant)
 );
 
 CREATE TABLE IF NOT EXISTS used_pairs (

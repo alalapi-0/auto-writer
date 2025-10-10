@@ -1,0 +1,250 @@
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>人工复核工作台</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    section { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    tr:hover { background-color: #f5f5f5; cursor: pointer; }
+    textarea { width: 100%; min-height: 140px; }
+    .actions { display: flex; gap: 12px; margin-top: 12px; }
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; background: #eef; margin-right: 4px; font-size: 12px; }
+    .diff-list { max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 8px; }
+    .status-pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: #d5f5e3; color: #1e8449; }
+    .status-pill.rejected { background: #fadbd8; color: #c0392b; }
+    .status-pill.pending { background: #fef9e7; color: #b9770e; }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>人工复核队列</h1>
+      <p>自动投递策略：<strong id="auto-deliver-flag"></strong></p>
+      <table id="queue-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>标题</th>
+            <th>关键词</th>
+            <th>原因</th>
+            <th>状态</th>
+            <th>质量分</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="6">加载中...</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <section>
+      <h2>复核详情</h2>
+      <div id="detail-placeholder">请选择左侧列表中的草稿。</div>
+      <div id="detail-panel" style="display:none;">
+        <p><strong>标题：</strong><span id="detail-title"></span></p>
+        <p><strong>状态：</strong><span id="detail-status" class="status-pill"></span></p>
+        <p><strong>入队原因：</strong><span id="detail-reason"></span></p>
+        <p><strong>Prompt Variant：</strong><span id="detail-variant"></span></p>
+        <p><strong>质量分：</strong><span id="detail-score"></span></p>
+        <p><strong>命中规则：</strong><span id="detail-reasons"></span></p>
+        <h3>差异记录</h3>
+        <div id="diff-container" class="diff-list">暂无编辑。</div>
+        <h3>快速编辑</h3>
+        <label>标题
+          <input id="edit-title" type="text" />
+        </label>
+        <label>摘要
+          <textarea id="edit-summary"></textarea>
+        </label>
+        <label>标签（逗号分隔）
+          <input id="edit-tags" type="text" />
+        </label>
+        <label>正文
+          <textarea id="edit-body"></textarea>
+        </label>
+        <div class="actions">
+          <button id="patch-btn">保存修改</button>
+          <button id="approve-btn">通过</button>
+          <button id="reject-btn" style="background:#e74c3c;color:#fff;">驳回</button>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script>
+    const autoDeliver = {{ 'true' if auto_deliver else 'false' }};
+    document.getElementById('auto-deliver-flag').textContent = autoDeliver ? '开启（审核通过即投递）' : '关闭（需手动投递）';
+
+    let currentReviewId = null;
+    const tableBody = document.querySelector('#queue-table tbody');
+
+    function ensureToken() {
+      const token = localStorage.getItem('jwt');
+      if (!token) {
+        tableBody.innerHTML = '<tr><td colspan="6">请先登录 Dashboard。</td></tr>';
+        throw new Error('not-authenticated');
+      }
+      return token;
+    }
+
+    function renderQueue(items) {
+      if (!items.length) {
+        tableBody.innerHTML = '<tr><td colspan="6">暂无待复核草稿。</td></tr>';
+        return;
+      }
+      tableBody.innerHTML = items.map(item => `
+        <tr data-id="${item.id}">
+          <td>${item.id}</td>
+          <td>${item.title || '—'}</td>
+          <td>${item.keyword || '—'}</td>
+          <td><span class="badge">${item.reason}</span></td>
+          <td><span class="status-pill ${item.status}">${item.status}</span></td>
+          <td>${item.quality !== null && item.quality !== undefined ? item.quality : '—'}</td>
+        </tr>
+      `).join('');
+    }
+
+    async function loadQueue() {
+      try {
+        const token = ensureToken();
+        const resp = await fetch('/review/queue', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!resp.ok) {
+          tableBody.innerHTML = '<tr><td colspan="6">加载失败，请检查权限。</td></tr>';
+          return;
+        }
+        const data = await resp.json();
+        renderQueue(data.items || []);
+      } catch (err) {
+        if (err.message === 'not-authenticated') return;
+        console.error(err);
+        tableBody.innerHTML = '<tr><td colspan="6">加载失败，详见控制台。</td></tr>';
+      }
+    }
+
+    function renderDiffs(diffs) {
+      if (!diffs || !diffs.edits || !diffs.edits.length) {
+        return '暂无编辑。';
+      }
+      return diffs.edits.map(edit => {
+        const before = (edit.before ?? '').toString();
+        const after = (edit.after ?? '').toString();
+        return `<div><strong>${edit.field}</strong>：<em>${edit.reviewer}</em> 在 ${edit.edited_at} 调整，差异比例 ${(edit.ratio * 100).toFixed(1)}%<br/>` +
+               `<small>before: ${before.slice(0, 120)}${before.length > 120 ? '…' : ''}</small><br/>` +
+               `<small>after: ${after.slice(0, 120)}${after.length > 120 ? '…' : ''}</small></div>`;
+      }).join('<hr/>');
+    }
+
+    async function loadDetail(id) {
+      const token = ensureToken();
+      const resp = await fetch(`/review/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!resp.ok) {
+        alert('加载详情失败');
+        return;
+      }
+      const data = await resp.json();
+      currentReviewId = id;
+      document.getElementById('detail-placeholder').style.display = 'none';
+      document.getElementById('detail-panel').style.display = 'block';
+      document.getElementById('detail-title').textContent = data.article?.title || '—';
+      const statusPill = document.getElementById('detail-status');
+      statusPill.textContent = data.status;
+      statusPill.className = `status-pill ${data.status}`;
+      document.getElementById('detail-reason').textContent = data.reason;
+      document.getElementById('detail-variant').textContent = data.quality?.prompt_variant || '—';
+      document.getElementById('detail-score').textContent = data.quality?.scores?.overall ?? '—';
+      document.getElementById('detail-reasons').textContent = (data.quality?.reasons || []).join('、') || '—';
+      document.getElementById('diff-container').innerHTML = renderDiffs(data.diffs);
+      document.getElementById('edit-title').value = data.article?.title || '';
+      document.getElementById('edit-summary').value = data.article?.summary || '';
+      document.getElementById('edit-tags').value = (data.article?.tags || []).join(',');
+      document.getElementById('edit-body').value = data.article?.content || '';
+    }
+
+    async function submitPatch() {
+      if (!currentReviewId) return;
+      const token = ensureToken();
+      const payload = {
+        title: document.getElementById('edit-title').value,
+        summary: document.getElementById('edit-summary').value,
+        tags: document.getElementById('edit-tags').value,
+        body: document.getElementById('edit-body').value,
+      };
+      const resp = await fetch(`/review/${currentReviewId}/patch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert('保存失败：' + (err.detail || resp.status));
+        return;
+      }
+      await loadDetail(currentReviewId);
+    }
+
+    async function approve() {
+      if (!currentReviewId) return;
+      if (!confirm('确认通过该草稿吗？')) return;
+      const token = ensureToken();
+      const resp = await fetch(`/review/${currentReviewId}/approve`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert('通过失败：' + (err.detail || resp.status));
+        return;
+      }
+      alert('审核完成');
+      await loadQueue();
+      currentReviewId = null;
+      document.getElementById('detail-panel').style.display = 'none';
+      document.getElementById('detail-placeholder').style.display = 'block';
+    }
+
+    async function reject() {
+      if (!currentReviewId) return;
+      const reason = prompt('请输入驳回原因', '质量不达标');
+      if (reason === null) return;
+      const token = ensureToken();
+      const resp = await fetch(`/review/${currentReviewId}/reject`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ reason }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert('驳回失败：' + (err.detail || resp.status));
+        return;
+      }
+      alert('已驳回');
+      await loadQueue();
+      currentReviewId = null;
+      document.getElementById('detail-panel').style.display = 'none';
+      document.getElementById('detail-placeholder').style.display = 'block';
+    }
+
+    tableBody.addEventListener('click', (event) => {
+      const row = event.target.closest('tr[data-id]');
+      if (!row) return;
+      const id = row.getAttribute('data-id');
+      loadDetail(id);
+    });
+
+    document.getElementById('patch-btn').addEventListener('click', submitPatch);
+    document.getElementById('approve-btn').addEventListener('click', approve);
+    document.getElementById('reject-btn').addEventListener('click', reject);
+
+    loadQueue();
+  </script>
+</body>
+</html>
