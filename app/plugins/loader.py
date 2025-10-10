@@ -11,6 +11,7 @@ from config.settings import settings  # 引入配置
 from app.db.migrate_sched import sched_session_scope  # 调度库 Session
 from app.db.models_sched import PluginRegistry  # 插件注册表模型
 from app.utils.logger import get_logger  # 日志工具
+from app.telemetry.client import emit_metric  # 指标事件上报
 from app.telemetry.metrics import inc_plugin_error  # 引入插件错误指标
 
 LOGGER = get_logger(__name__)  # 初始化日志
@@ -170,6 +171,7 @@ def apply_filter_hooks(stage: str, payload: Dict) -> Dict:  # 过滤 Hook 调用
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("过滤插件执行失败 stage=%s error=%s", stage, exc)
             inc_plugin_error(plugin_name)  # 记录插件错误
+            emit_metric("plugin", "plugin_fail", 1, platform=plugin_name)  # 上报插件失败指标
     return payload
 
 
@@ -183,3 +185,4 @@ def run_exporter_hook(stage: str, payload: Dict, platform: str) -> None:  # 导�
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("导出插件执行失败 stage=%s error=%s", stage, exc)
             inc_plugin_error(plugin_name)  # 记录插件错误
+            emit_metric("plugin", "plugin_fail", 1, platform=plugin_name)  # 上报插件失败指标

@@ -61,6 +61,9 @@ DELIVERY_ENABLED_PLATFORMS = _parse_platform_list(  # 从环境变量解析启�
     ["wechat_mp", "zhihu"],  # 默认启用微信公众号与知乎平台
 )  # 结束平台列表常量定义
 OUTBOX_DIR = os.getenv("OUTBOX_DIR", "./outbox")  # 读取 OUTBOX_DIR 环境变量，默认输出到 ./outbox
+OUTBOX_QUARANTINE_DIR = os.getenv(  # 新增: 读取隔离目录环境变量
+    "OUTBOX_QUARANTINE_DIR", "./outbox_quarantine"
+)  # 新增: 默认隔离目录为仓库下 outbox_quarantine
 LOG_DIR = os.getenv("LOG_DIR", "./logs")  # 读取 LOG_DIR 环境变量，默认日志目录为 ./logs
 EXPORT_DIR = os.getenv("EXPORT_DIR", "./exports")  # 读取 EXPORT_DIR 环境变量，默认导出目录为 ./exports
 RETRY_BASE_SECONDS = _parse_int(os.getenv("RETRY_BASE_SECONDS"), 300)  # 读取 RETRY_BASE_SECONDS 环境变量，默认 300 秒
@@ -235,6 +238,7 @@ class Settings:
         default_factory=list  # 新增: 默认使用空列表占位
     )
     outbox_dir: str = "./outbox"  # 新增: 草稿输出目录默认值
+    outbox_quarantine_dir: str = "./outbox_quarantine"  # 新增: 草稿隔离目录默认值
     retry_base_seconds: int = 300  # 新增: 重试基础秒数默认值
     retry_max_attempts: int = 5  # 新增: 最大重试次数默认值
     theme_low_watermark: int = 20  # 新增: 主题库存低水位默认值
@@ -402,6 +406,7 @@ def get_settings() -> Settings:
         wp_app_pass=os.getenv("WP_APP_PASS"),
         delivery_enabled_platforms=list(DELIVERY_ENABLED_PLATFORMS),  # 新增: 注入平台开关配置
         outbox_dir=OUTBOX_DIR,  # 新增: 注入 outbox 目录
+        outbox_quarantine_dir=OUTBOX_QUARANTINE_DIR,  # 新增: 注入隔离目录
         retry_base_seconds=RETRY_BASE_SECONDS,  # 新增: 注入重试基础秒数
         retry_max_attempts=RETRY_MAX_ATTEMPTS,  # 新增: 注入最大重试次数
         logs_dir=Path(LOG_DIR),  # 新增: 使用环境变量指定日志目录
@@ -446,6 +451,7 @@ def print_config(mask_secrets: bool = True) -> None:  # 定义打印配置的便
         ("Dashboard 允许远程", str(settings.dashboard_enable_remote), False),  # 是否开放远程访问
         ("统一时区", settings.tz, False),  # 调度与展示使用的时区
         ("OUTBOX_DIR", settings.outbox_dir, False),  # 草稿输出目录
+        ("OUTBOX_QUARANTINE_DIR", settings.outbox_quarantine_dir, False),  # 草稿隔离目录
         ("LOG_DIR", str(settings.logs_dir), False),  # 日志目录
         ("EXPORT_DIR", str(settings.exports_dir), False),  # 导出目录
         ("PROFILES_DIR", settings.profiles_dir, False),  # Profile 目录

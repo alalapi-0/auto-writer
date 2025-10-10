@@ -4,6 +4,7 @@ from __future__ import annotations  # 启用未来注解语法
 
 import threading  # 提供本地锁
 from datetime import datetime, timezone  # 处理时间
+import hashlib  # 计算幂等键所需的哈希函数
 from time import perf_counter  # 高精度耗时计算
 from pathlib import Path  # 处理路径
 from zoneinfo import ZoneInfo  # 处理时区
@@ -76,27 +77,57 @@ def run_profile(profile_id: int) -> None:  # 供 APScheduler 调用的任务函�
         LOGGER.info("Profile 仍在执行，跳过 profile_id=%s", profile_id)  # 记录提示
         return  # 直接返回
     job_id = None  # 初始化运行记录 ID
+    profile_yaml: dict = {}  # 初始化 Profile YAML 内容
+    profile_name: str | None = None  # 初始化 Profile 名称缓存
+    dispatch_mode = "queue"  # 默认调度模式
+    batch_no = "default"  # 默认批次编号
+    idempotency_key = ""  # 初始化幂等键
+    run_date = _now_local().date()  # 记录运行所属日期
     try:  # 捕获执行异常
-        with sched_session_scope() as session:  # 打开 Session
+        with sched_session_scope() as session:  # 首次会话读取 Profile 元数据
             profile = session.query(Profile).filter(Profile.id == profile_id).one_or_none()  # 查询 Profile
             if profile is None or not profile.is_enabled:  # 校验启用状态
                 LOGGER.warning("Profile 不存在或已禁用 profile_id=%s", profile_id)  # 记录警告
                 inc_run("skipped", profile_label)  # 记录一次跳过
                 return  # 直接返回
-            dispatch_mode = profile.dispatch_mode or "queue"  # 读取调度模式
-            initial_status = "queued" if settings.worker_enable and dispatch_mode == "queue" else "running"  # 判定初始状态
-            job = JobRun(profile_id=profile_id, status=initial_status)  # 创建运行记录
-            session.add(job)  # 添加记录
-            session.flush()  # 刷新获取 ID
-            job_id = job.id  # 保存 ID
             yaml_path = profile.yaml_path  # 缓存 YAML 路径
             profile_name = profile.name  # 缓存 Profile 名称
             if profile_name:  # 若存在 profile 名称
                 profile_label = profile_name  # 使用更友好的标签
+            dispatch_mode = profile.dispatch_mode or "queue"  # 默认调度模式
         profile_yaml = _load_profile_yaml(yaml_path)  # 加载 YAML 配置
-        dispatch_mode = profile_yaml.get("dispatch_mode", profile_yaml.get("dispatch", {}).get("mode", "queue"))  # 解析 YAML 中的调度模式
-        if profile_name:  # YAML 内优先级
-            profile_label = profile_name  # 再次同步 label
+        yaml_dispatch_mode = profile_yaml.get("dispatch_mode") or profile_yaml.get("dispatch", {}).get("mode")  # 读取 YAML 中的调度模式覆盖
+        if yaml_dispatch_mode:  # 若 YAML 明确指定
+            dispatch_mode = yaml_dispatch_mode  # 使用 YAML 模式
+        batch_no = str(  # 解析批次编号
+            profile_yaml.get("dispatch", {}).get("batch_no")
+            or profile_yaml.get("generation", {}).get("batch_no")
+            or "default"
+        )  # 提取批次编号
+        input_key = f"{profile_id}-{run_date.isoformat()}-{batch_no}"  # 构造幂等输入
+        idempotency_key = hashlib.sha256(input_key.encode("utf-8")).hexdigest()  # 计算幂等键
+        initial_status = "queued" if settings.worker_enable and dispatch_mode == "queue" else "running"  # 判定初始状态
+        with sched_session_scope() as session:  # 第二次会话负责落库 JobRun
+            exists = (  # 查询是否已有相同幂等键
+                session.query(JobRun)
+                .filter(JobRun.idempotency_key == idempotency_key)
+                .one_or_none()
+            )
+            if exists:  # 命中重复
+                LOGGER.warning("幂等键命中，拒绝重复执行 profile_id=%s idempotency=%s", profile_id, idempotency_key)  # 记录审计日志
+                emit_metric("dispatch", "job_dedup_hit", 1, profile_id=profile_id)  # 记录指标
+                inc_run("skipped", profile_label)  # 记录一次跳过
+                return  # 不再创建 JobRun
+            job = JobRun(  # 创建 JobRun 记录
+                profile_id=profile_id,
+                status=initial_status,
+                idempotency_key=idempotency_key,
+                run_date=run_date,
+                batch_no=batch_no,
+            )
+            session.add(job)  # 添加记录
+            session.flush()  # 刷新获取 ID
+            job_id = job.id  # 保存 ID
         if settings.worker_enable and dispatch_mode == "queue":  # 当启用队列模式
             enqueue_task(  # 调用分发服务入队
                 profile_id=profile_id,
@@ -107,10 +138,14 @@ def run_profile(profile_id: int) -> None:  # 供 APScheduler 调用的任务函�
                     "yaml_path": yaml_path,
                     "dispatch": profile_yaml.get("dispatch", {}),
                     "mode": profile_yaml.get("dispatch", {}).get("mode", "full"),
+                    "run_date": run_date.isoformat(),
+                    "batch_no": batch_no,
+                    "idempotency_key": idempotency_key,
                 },
-                idempotency_key=f"job-{job_id}",
+                idempotency_key=idempotency_key,
             )
             LOGGER.info("Profile 入队等待 Worker 执行 profile_id=%s job_id=%s", profile_id, job_id)  # 记录入队日志
+            emit_metric("dispatch", "job_enqueued", 1, profile_id=profile_id)  # 记录入队指标
             inc_run("queued", profile_label)  # 记录队列指标
             return  # 队列模式无需本地执行
         plan_payload = {"profile": profile_name, "timestamp": _now_local().isoformat()}  # 构造计划数据

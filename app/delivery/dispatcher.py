@@ -7,12 +7,15 @@ from typing import Dict  # 类型提示
 
 from sqlalchemy import text  # 执行原生 SQL
 from sqlalchemy.orm import Session  # 引入会话类型
+from tenacity import RetryError, retry, stop_after_attempt, wait_random_exponential  # 引入重试工具
 
 from app.utils.logger import get_logger  # 引入统一日志模块
 
 from app.delivery.registry import get_registry  # 加载适配器注册表
 from app.delivery.types import DeliveryResult  # 引入统一返回结构
 from app.plugins.loader import run_exporter_hook  # 引入插件导出 Hook
+from app.telemetry.client import emit_metric  # 指标事件
+from app.telemetry.metrics import inc_delivery  # Prometheus 计数
 
 
 def _next_backoff(base_seconds: int, attempt: int) -> int:
@@ -52,6 +55,57 @@ def _coerce_datetime(raw):
     return None  # 其他类型不支持
 
 
+def _call_adapter_with_retry(adapter, article: Dict, settings) -> DeliveryResult:
+    """封装外部适配器调用，统一应用退避重试策略。"""  # 中文说明
+
+    @retry(  # 使用 tenacity 装饰器
+        stop=stop_after_attempt(settings.job_max_retries),  # 最大尝试次数
+        wait=wait_random_exponential(
+            multiplier=settings.job_retry_backoff_sec, max=settings.job_retry_backoff_sec * 10
+        ),  # 指数退避加抖动
+        reraise=True,  # 重试耗尽抛出异常
+    )
+    def _invoke() -> DeliveryResult:  # 内部执行函数
+        return adapter(article, settings)  # 实际调用适配器
+
+    return _invoke()  # 返回结果
+
+
+def _find_duplicate_log(db: Session, article: Dict, platform: str) -> Dict | None:
+    """根据标题与角色组合检测重复投递。"""  # 中文说明
+
+    title = article.get("title")  # 标题
+    character = article.get("character_name")  # 角色
+    work = article.get("work")  # 作品
+    created_at = _coerce_datetime(article.get("created_at"))  # 创建时间
+    if not all([title, character, work, created_at]):  # 字段缺失时直接跳过
+        return None
+    stmt = text(
+        """
+        SELECT pl.*
+        FROM platform_logs pl
+        JOIN articles a ON pl.article_id = a.id
+        WHERE pl.platform = :platform
+          AND a.title = :title
+          AND a.character_name = :character
+          AND a.work = :work
+          AND DATE(pl.created_at) = :day
+        LIMIT 1
+        """
+    )  # SQL 语句
+    row = db.execute(
+        stmt,
+        {
+            "platform": platform,
+            "title": title,
+            "character": character,
+            "work": work,
+            "day": created_at.date().isoformat(),
+        },
+    ).mappings().first()  # 执行查询
+    return dict(row) if row else None  # 返回字典或 None
+
+
 def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, DeliveryResult]:
     """针对单篇文章触发所有启用平台的投递流程。"""  # 函数中文文档
 
@@ -72,6 +126,26 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
     base_seconds = getattr(settings, "retry_base_seconds", 300)  # 读取基础退避
 
     for platform, adapter in registry.items():  # 遍历平台
+        duplicate_log = _find_duplicate_log(db, article, platform)  # 检查重复记录
+        if duplicate_log:  # 命中重复则直接跳过
+            LOGGER.info(
+                "delivery_duplicate_skip",
+                platform=platform,
+                article_id=article_id,
+                log_id=duplicate_log.get("id"),
+            )
+            emit_metric("delivery", "duplicate_skip", 1, platform=platform)  # 记录重复指标
+            payload = _load_payload(duplicate_log.get("payload"))  # 恢复历史 payload
+            results[platform] = DeliveryResult(  # 返回历史结果
+                platform=platform,
+                status=duplicate_log.get("status") or "skipped",
+                target_id=duplicate_log.get("target_id"),
+                out_dir=None,
+                payload=payload,
+                error=duplicate_log.get("last_error"),
+            )
+            inc_delivery(platform, duplicate_log.get("status") or "skipped")  # 记录 Prometheus
+            continue
         log_stmt = text(
             """
             SELECT *
@@ -148,7 +222,24 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                 attempts_so_far + 1,
             )
             run_exporter_hook("on_before_publish", article, platform)  # 投递前触发插件 Hook
-            res = adapter(article, settings)  # 调用适配器
+            try:
+                res = _call_adapter_with_retry(adapter, article, settings)  # 调用适配器并自动重试
+            except RetryError as exc:  # 捕获重试耗尽
+                last_exc = exc.last_attempt.exception() if exc.last_attempt else exc  # 获取最终异常
+                LOGGER.error(
+                    "delivery_adapter_failed",
+                    platform=platform,
+                    article_id=article_id,
+                    error=str(last_exc),
+                )
+                res = DeliveryResult(  # 构造失败结果
+                    platform=platform,
+                    status="failed",
+                    target_id=None,
+                    out_dir=None,
+                    payload={"retry_attempts": exc.last_attempt.attempt_number if exc.last_attempt else settings.job_max_retries},
+                    error=str(last_exc),
+                )
             payload_json = json.dumps(res.payload or {}, ensure_ascii=False)  # 序列化 payload
             ok_flag = res.status in {"prepared", "queued", "success"}  # 判断成功
             trans = db.begin_nested() if db.in_transaction() else db.begin()  # 兼容已有事务的开启方式
@@ -245,6 +336,11 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                     platform,
                     res.status,
                 )
+                if res.status in {"prepared", "queued", "success"}:  # 成功状态
+                    emit_metric("delivery", "platform_success", 1, platform=platform)  # 记录成功指标
+                else:
+                    emit_metric("delivery", "platform_failed", 1, platform=platform)  # 记录失败指标
+                inc_delivery(platform, res.status)  # 同步 Prometheus 计数
             except Exception:
                 trans.rollback()  # 回滚事务
                 LOGGER.exception(  # 记录回滚原因

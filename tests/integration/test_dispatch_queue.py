@@ -7,6 +7,8 @@ from pathlib import Path  # 路径处理
 import httpx  # HTTP 客户端
 import pytest  # 测试框架
 
+pytest.importorskip("fastapi")  # 若未安装 FastAPI 则跳过整个测试模块
+
 from app.dashboard.server import app as dashboard_app  # 引入 FastAPI 应用
 from app.dispatch.store import dispatch_session_scope  # 分发库会话
 from app.db import migrate_sched  # 引入调度库模块以便重绑 Session

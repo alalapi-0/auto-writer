@@ -18,6 +18,10 @@
       <div id="queue-stats">加载中...</div> <!-- 队列统计容器 -->
       <div id="heartbeat-list">加载中...</div> <!-- 心跳列表容器 -->
     </section>
+    <section> <!-- 死信箱区域 -->
+      <h2>死信箱</h2> <!-- 死信标题 -->
+      <div id="dead-letter-list">加载中...</div> <!-- 死信任务容器 -->
+    </section>
   </main>
   <script> // 页面脚本
   async function loadSummary() { // 定义加载函数
@@ -48,13 +52,30 @@
     const dispatchData = await dispatchResp.json(); // 解析队列数据
     const stats = dispatchData.queue || {}; // 队列统计
     const heartbeat = dispatchData.heartbeats || []; // 心跳列表
+    const deadLetters = dispatchData.dead_letters || []; // 死信任务
     document.getElementById('queue-stats').textContent = `待处理 ${stats.pending || 0}，租约中 ${stats.leased || 0}，已完成 ${stats.done || 0}，死亡 ${stats.dead || 0}`; // 展示统计
     if (!heartbeat.length) { // 无心跳
       document.getElementById('heartbeat-list').textContent = '暂无 Worker 心跳'; // 显示提示
     } else { // 有心跳
-      document.getElementById('heartbeat-list').innerHTML = heartbeat
-        .map(item => `<div>${item.agent_name} @ ${item.last_seen_at}</div>`) // 构造行
+      document.getElementById('heartbeat-list').innerHTML = heartbeat // 渲染心跳列表
+        .map(item => { // 逐项渲染
+          const meta = item.meta && item.meta.concurrency ? ` 并发 ${item.meta.concurrency}` : ''; // 并发信息
+          const cls = item.is_stale ? 'heartbeat-item offline' : 'heartbeat-item'; // 根据心跳状态确定样式
+          return `<div class="${cls}">${item.agent_name} @ ${item.last_seen_at}${meta}</div>`; // 返回 HTML 片段
+        })
         .join(''); // 合并字符串
+    }
+    const deadContainer = document.getElementById('dead-letter-list'); // 死信容器
+    if (!deadLetters.length) { // 无死信
+      deadContainer.textContent = '暂无死信任务'; // 显示提示
+    } else { // 存在死信
+      deadContainer.innerHTML = deadLetters
+        .map(item => { // 构造每条死信
+          const quarantine = item.quarantine_dir ? ` → ${item.quarantine_dir}` : ''; // 隔离目录
+          const error = item.error ? `（${item.error}）` : ''; // 错误信息
+          return `<div class="dead-letter-item">#${item.task_id} Profile ${item.profile_id} 重试 ${item.attempts} 次${quarantine}${error}</div>`; // 返回条目
+        })
+        .join(''); // 合并
     }
   }
   loadSummary(); // 调用加载函数

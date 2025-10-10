@@ -71,7 +71,10 @@ class DispatchWorker:  # Worker 实现类
     async def _send_heartbeat(self, client: httpx.AsyncClient) -> None:  # 发送心跳
         """调用心跳接口，保持 Worker 在线状态。"""  # 中文说明
 
-        payload = {"agent_name": self.name, "meta": {"concurrency": self.concurrency}}  # 心跳数据
+        payload = {  # 心跳数据
+            "agent_name": self.name,
+            "meta": {"concurrency": self.concurrency, "poll_interval": self.poll_interval},  # 附带轮询间隔
+        }
         await self._post_json(client, "/api/dispatch/heartbeat", payload)  # 提交请求
 
     async def _lease_tasks(self, client: httpx.AsyncClient, limit: int) -> List[Dict[str, Any]]:  # 租约任务
@@ -148,8 +151,8 @@ class DispatchWorker:  # Worker 实现类
         """发送 JSON 请求并自动重试，返回 JSON 响应。"""  # 中文说明
 
         async for attempt in AsyncRetrying(  # 使用 tenacity 控制重试
-            stop=stop_after_attempt(3),  # 最多重试三次
-            wait=wait_random_exponential(multiplier=0.5, max=5),  # 指数退避抖动
+            stop=stop_after_attempt(settings.job_max_retries),  # 使用配置的最大重试次数
+            wait=wait_random_exponential(multiplier=settings.job_retry_backoff_sec, max=settings.job_retry_backoff_sec * 10),  # 指数退避带抖动
             reraise=True,  # 重试耗尽后抛出异常
         ):
             with attempt:  # 每次尝试
