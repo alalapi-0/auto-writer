@@ -1,0 +1,45 @@
+<!DOCTYPE html> <!-- 登录页面文档类型 -->
+<html lang="zh"> <!-- 指定中文环境 -->
+<head> <!-- 页面头部开始 -->
+  <meta charset="utf-8" /> <!-- 设置字符集 -->
+  <title>AutoWriter 登录</title> <!-- 页面标题 -->
+  <link rel="stylesheet" href="/static/style.css" /> <!-- 引入基础样式 -->
+</head> <!-- 页面头部结束 -->
+<body> <!-- 页面主体开始 -->
+  <main> <!-- 主内容区域 -->
+    <h1>登录 Dashboard</h1> <!-- 标题 -->
+    <form id="login-form"> <!-- 登录表单 -->
+      <label>用户名 <!-- 用户名标签 -->
+        <input type="text" name="username" required /> <!-- 用户名输入框 -->
+      </label>
+      <label>密码 <!-- 密码标签 -->
+        <input type="password" name="password" required /> <!-- 密码输入框 -->
+      </label>
+      <button type="submit">登录</button> <!-- 提交按钮 -->
+    </form>
+    <p id="login-status"></p> <!-- 登录状态提示 -->
+  </main>
+  <script> // 简易提交脚本
+  document.getElementById('login-form').addEventListener('submit', async (event) => { // 监听提交事件
+    event.preventDefault(); // 阻止默认提交
+    const form = event.target; // 获取表单
+    const payload = { // 构造请求体
+      username: form.username.value,
+      password: form.password.value,
+    };
+    const resp = await fetch('/api/login', { // 调用登录 API
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (resp.ok) { // 请求成功
+      const data = await resp.json(); // 解析响应
+      localStorage.setItem('jwt', data.access_token); // 保存 token
+      window.location.href = '/'; // 跳转首页
+    } else {
+      document.getElementById('login-status').textContent = '登录失败，请检查凭证'; // 显示错误
+    }
+  });
+  </script>
+</body> <!-- 页面主体结束 -->
+</html>

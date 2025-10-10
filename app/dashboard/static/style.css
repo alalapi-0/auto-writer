@@ -1,0 +1,9 @@
+body { font-family: "Noto Sans", sans-serif; margin: 2rem; background: #f6f8fa; } /* 页面基础样式 */
+main { max-width: 720px; margin: 0 auto; background: #fff; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); } /* 主容器 */
+label { display: block; margin-bottom: 1rem; } /* 表单标签 */
+input { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px; } /* 输入框样式 */
+button { padding: 0.6rem 1.2rem; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; } /* 按钮样式 */
+button:hover { background: #1d4ed8; } /* 按钮 hover 效果 */
+table { width: 100%; border-collapse: collapse; margin-top: 1rem; } /* 表格样式 */
+th, td { border: 1px solid #e5e7eb; padding: 0.5rem; text-align: left; } /* 单元格样式 */
+th { background: #f1f5f9; } /* 表头背景 */

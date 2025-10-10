@@ -23,12 +23,24 @@ retry-due:
 	python scripts/retry_due.py
 
 doctor:
-	# 执行一键自检，输出配置、数据库与平台状态
-	python -m scripts.doctor
+        # 执行一键自检，输出配置、数据库与平台状态
+        python -m scripts.doctor
+
+run-dashboard:
+        # 启动本地 Dashboard FastAPI 服务
+        python -m app.dashboard.server
+
+run-scheduler:
+        # 启动调度服务，加载 Profile 并注册 APScheduler 任务
+        python -m app.scheduler.service
+
+add-user:
+        # 通过 CLI 创建 Dashboard 用户，需指定 USER 环境变量
+        python -m scripts.add_user --username $(USER) --role admin
 
 report:
-	# 导出可观测性报表，默认统计近 7 天
-	python -m scripts.export_report --window 7
+        # 导出可观测性报表，默认统计近 7 天
+        python -m scripts.export_report --window 7
 
 test-e2e:
 	# 运行端到端集成测试确保关键链路可用

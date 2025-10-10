@@ -1,0 +1,26 @@
+# 默认 Profile 示例，字段带中文注释说明含义
+name: default_sample  # Profile 名称
+enabled: true  # 是否启用
+
+# 生成阶段配置
+generation:
+  articles_per_day: 2  # 每日生成篇数
+  target_words: 1500  # 目标字数
+  llm_preset: "meta/llama3.1-8b-instruct"  # 使用的模型预设
+  dedup:
+    check_title: true  # 是否检查标题重复
+    check_role_work_pair: true  # 是否检查角色作品组合
+    hamming_threshold: 0.8  # 哈明距离阈值
+
+# 投递阶段配置
+delivery:
+  platforms:
+    - wechat_mp  # 需要投递的平台
+  window:
+    start: "08:00"  # 发布窗口起始
+    end: "10:00"  # 发布窗口结束
+
+# Playwright 参数覆盖
+playwright:
+  headless: true  # 浏览器是否无头
+  slowmo_ms: 0  # 慢动作延迟

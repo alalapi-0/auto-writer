@@ -30,3 +30,7 @@ reports/
 .sessions/
 logs/screenshots/
 logs/traces/
+.data/
+profiles/*.yml
+!profiles/default.yml
+!profiles/psy_film.yml

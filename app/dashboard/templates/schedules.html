@@ -1,0 +1,67 @@
+<!DOCTYPE html> <!-- 调度页面 -->
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>调度管理</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main>
+    <h1>调度管理</h1>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Profile</th>
+          <th>Cron</th>
+          <th>暂停</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="schedule-body">
+        <tr><td colspan="5">加载中...</td></tr>
+      </tbody>
+    </table>
+  </main>
+  <script>
+  async function loadSchedules() {
+    const token = localStorage.getItem('jwt');
+    if (!token) {
+      document.getElementById('schedule-body').innerHTML = '<tr><td colspan="5">请先登录</td></tr>';
+      return;
+    }
+    const resp = await fetch('/api/schedules', { headers: { Authorization: `Bearer ${token}` } });
+    if (!resp.ok) {
+      document.getElementById('schedule-body').innerHTML = '<tr><td colspan="5">加载失败</td></tr>';
+      return;
+    }
+    const data = await resp.json();
+    document.getElementById('schedule-body').innerHTML = data.items.map((row) => `
+      <tr>
+        <td>${row.id}</td>
+        <td>${row.profile_id}</td>
+        <td>${row.cron}</td>
+        <td>${row.paused ? '是' : '否'}</td>
+        <td>
+          <button onclick="updateSchedule(${row.id}, 'pause')">暂停</button>
+          <button onclick="updateSchedule(${row.id}, 'resume')">恢复</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+  async function updateSchedule(id, action) {
+    const token = localStorage.getItem('jwt');
+    const resp = await fetch(`/api/schedules/${id}/${action}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (resp.ok) {
+      loadSchedules();
+    } else {
+      alert('操作失败，请检查权限');
+    }
+  }
+  loadSchedules();
+  </script>
+</body>
+</html>

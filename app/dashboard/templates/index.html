@@ -1,0 +1,37 @@
+<!DOCTYPE html> <!-- 总览页面文档类型 -->
+<html lang="zh"> <!-- 指定中文环境 -->
+<head> <!-- 头部开始 -->
+  <meta charset="utf-8" /> <!-- 字符集 -->
+  <title>AutoWriter Dashboard</title> <!-- 页面标题 -->
+  <link rel="stylesheet" href="/static/style.css" /> <!-- 样式表 -->
+</head> <!-- 头部结束 -->
+<body> <!-- 页面主体开始 -->
+  <main> <!-- 主容器 -->
+    <h1>概览</h1> <!-- 标题 -->
+    <p>使用浏览器存储的 JWT 自动调用 API，若未登录请先访问 <a href="/login">登录页</a>。</p> <!-- 登录提示 -->
+    <section> <!-- 指标区域 -->
+      <h2>近 7 天摘要</h2> <!-- 指标标题 -->
+      <div id="summary">加载中...</div> <!-- 指标容器 -->
+    </section>
+  </main>
+  <script> // 页面脚本
+  async function loadSummary() { // 定义加载函数
+    const token = localStorage.getItem('jwt'); // 读取 JWT
+    if (!token) { // 未登录
+      document.getElementById('summary').textContent = '请先登录'; // 提示
+      return;
+    }
+    const resp = await fetch('/api/metrics/summary?days=7', { // 调用 API
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) { // 请求失败
+      document.getElementById('summary').textContent = '加载失败，请检查权限';
+      return;
+    }
+    const data = await resp.json(); // 解析数据
+    document.getElementById('summary').textContent = `成功 ${data.success} 次，错误 ${data.errors} 次`; // 展示数据
+  }
+  loadSummary(); // 调用加载函数
+  </script>
+</body> <!-- 页面主体结束 -->
+</html>

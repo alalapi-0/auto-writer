@@ -81,6 +81,20 @@ PLAYWRIGHT_SCREENSHOT_DIR_DEFAULT = os.getenv(
     "PW_SHOT_DIR", "./logs/screenshots"
 )  # 新增: 截图输出目录
 PLAYWRIGHT_TRACING_DEFAULT = _get_env_bool("PW_TRACING", False)  # 新增: 是否开启 tracing 记录
+TZ_DEFAULT = os.getenv("TZ", "Asia/Tokyo")  # 新增: 调度与展示统一时区默认值
+DASHBOARD_BIND_DEFAULT = os.getenv("DASHBOARD_BIND", "127.0.0.1:8787")  # 新增: Dashboard 监听地址
+DASHBOARD_JWT_SECRET_VALUE = os.getenv("DASHBOARD_JWT_SECRET", "")  # 新增: Dashboard JWT 密钥
+DASHBOARD_ENABLE_REMOTE_DEFAULT = _get_env_bool("DASHBOARD_ENABLE_REMOTE", False)  # 新增: 是否允许远程访问
+INGEST_ENDPOINT_DEFAULT = os.getenv("INGEST_ENDPOINT", "http://127.0.0.1:8787/api/ingest")  # 新增: 遥测上报地址
+SCHED_ENABLE_DEFAULT = _get_env_bool("SCHED_ENABLE", True)  # 新增: 是否启动调度
+SCHED_MAX_PARALLEL_DEFAULT = _get_env_int("SCHED_MAX_PARALLEL", 1)  # 新增: 同一 profile 并行度
+SCHED_DB_URL_DEFAULT = os.getenv("SCHED_DB_URL", "sqlite:///./.data/scheduler.db")  # 新增: 调度数据库 URL
+PROFILES_DIR_DEFAULT = os.getenv("PROFILES_DIR", "./profiles")  # 新增: Profile 目录
+PLUGINS_DIR_DEFAULT = os.getenv("PLUGINS_DIR", "./plugins")  # 新增: 插件目录
+PLUGINS_ENABLED_DEFAULT = os.getenv("PLUGINS_ENABLED", "filters,no_call_to_action;exporters,video_stub")  # 新增: 插件示例配置
+METRICS_BUFFER_MAX_DEFAULT = _get_env_int("METRICS_BUFFER_MAX", 1000)  # 新增: 遥测缓冲上限
+JWT_ACCESS_EXPIRE_MIN_DEFAULT = _get_env_int("JWT_ACCESS_EXPIRE_MIN", 1440)  # 新增: JWT 过期时间
+ADMIN_INIT_TOKEN_DEFAULT = os.getenv("ADMIN_INIT_TOKEN", "")  # 新增: 首次管理员初始化令牌
 
 
 class ConfigError(Exception):
@@ -157,6 +171,20 @@ class Settings:
     sqlite_url: str = field(
         default_factory=lambda: f"sqlite:///{(ensure_subdir('data') / 'autowriter.db').as_posix()}"
     )  # TODO: 默认 SQLite 数据库迁移到应用目录
+    tz: str = TZ_DEFAULT  # 新增: 调度统一时区
+    dashboard_bind: str = DASHBOARD_BIND_DEFAULT  # 新增: Dashboard 监听地址
+    dashboard_jwt_secret: str = DASHBOARD_JWT_SECRET_VALUE  # 新增: Dashboard JWT 密钥
+    dashboard_enable_remote: bool = DASHBOARD_ENABLE_REMOTE_DEFAULT  # 新增: 是否允许远程访问
+    ingest_endpoint: str = INGEST_ENDPOINT_DEFAULT  # 新增: 遥测上报入口
+    sched_enable: bool = SCHED_ENABLE_DEFAULT  # 新增: 是否启用调度服务
+    sched_max_parallel: int = SCHED_MAX_PARALLEL_DEFAULT  # 新增: 单 Profile 并行度
+    sched_db_url: str = SCHED_DB_URL_DEFAULT  # 新增: 调度数据库 URL
+    profiles_dir: str = PROFILES_DIR_DEFAULT  # 新增: Profile YAML 目录
+    plugins_dir: str = PLUGINS_DIR_DEFAULT  # 新增: 插件目录
+    plugins_enabled: str = PLUGINS_ENABLED_DEFAULT  # 新增: 插件启用配置
+    metrics_buffer_max: int = METRICS_BUFFER_MAX_DEFAULT  # 新增: 遥测缓冲上限
+    jwt_access_expire_min: int = JWT_ACCESS_EXPIRE_MIN_DEFAULT  # 新增: JWT 过期时间
+    admin_init_token: str = ADMIN_INIT_TOKEN_DEFAULT  # 新增: 首次管理员初始化令牌
 
     # === 平台开关与凭据 ===
     enable_wechat_mp: bool = False  # TODO: 微信公众号默认关闭
@@ -234,7 +262,7 @@ class Settings:
     def timezone(self) -> str:
         """向后兼容属性，返回 orchestrator 时区。"""
 
-        return self.orchestrator.timezone
+        return self.tz or self.orchestrator.timezone
 
     def validate_credentials(self) -> List[str]:
         """对已启用的平台做“必填/形状”校验，返回错误列表。"""
@@ -289,7 +317,7 @@ def get_settings() -> Settings:
         keyword_recent_cooldown_days=_get_env_int("KEYWORD_RECENT_COOLDOWN_DAYS", 30),
         postrun_enrich_group_size=_get_env_int("POSTRUN_ENRICH_GROUP_SIZE", 3),
         enable_postrun_enrich=_get_env_bool("ENABLE_POSTRUN_ENRICH", True),
-        timezone=os.getenv("TIMEZONE", "Asia/Tokyo"),
+        timezone=os.getenv("TIMEZONE", TZ_DEFAULT),
     )
 
     scheduler_config = SchedulerConfig(
@@ -358,8 +386,10 @@ settings = get_settings()  # 模块级别创建配置实例，供其他模块直
 def _mask_value(value: str | None) -> str:  # 定义内部函数用于屏蔽敏感配置
     """对敏感信息进行脱敏，保留首尾字符。"""  # 中文文档说明函数用途
 
-    if not value:  # 当值为空时直接返回空字符串
+    if value is None:  # 当值为空时直接返回空字符串
         return ""  # 返回空串避免打印 None
+    if not isinstance(value, str):  # 若输入为非字符串则转为字符串
+        value = str(value)  # 调用 str 以确保后续处理
     if len(value) <= 4:  # 若字符串过短则直接返回掩码
         return "*" * len(value)  # 以相同长度的星号替代
     return f"{value[0]}{'*' * (len(value) - 2)}{value[-1]}"  # 保留首尾字符并遮蔽中间部分
@@ -371,26 +401,35 @@ def print_config(mask_secrets: bool = True) -> None:  # 定义打印配置的便
     config_items = [  # 构造待打印配置项列表
         ("数据库 URL", settings.database.url, True),  # 数据库连接字符串属于敏感信息
         ("SQLite URL", settings.sqlite_url, False),  # SQLite 本地路径相对不敏感
+        ("调度数据库", settings.sched_db_url, True),  # 调度数据库同样需要脱敏
+        ("Dashboard 绑定", settings.dashboard_bind, False),  # Dashboard 监听地址
+        ("Dashboard 允许远程", str(settings.dashboard_enable_remote), False),  # 是否开放远程访问
+        ("统一时区", settings.tz, False),  # 调度与展示使用的时区
         ("OUTBOX_DIR", settings.outbox_dir, False),  # 草稿输出目录
         ("LOG_DIR", str(settings.logs_dir), False),  # 日志目录
         ("EXPORT_DIR", str(settings.exports_dir), False),  # 导出目录
+        ("PROFILES_DIR", settings.profiles_dir, False),  # Profile 目录
+        ("PLUGINS_DIR", settings.plugins_dir, False),  # 插件目录
+        ("启用插件", settings.plugins_enabled, False),  # 插件启用列表
         ("重试基础秒数", str(settings.retry_base_seconds), False),  # 重试初始间隔
         ("最大重试次数", str(settings.retry_max_attempts), False),  # 重试上限
         ("主题低水位", str(settings.theme_low_watermark), False),  # 主题库存低水位
         ("启用平台", ",".join(settings.delivery_enabled_platforms), False),  # 平台启用列表
         ("PLAYWRIGHT_HEADLESS", str(settings.playwright_headless), False),  # 浏览器无头模式
-        ("SESSION_DIR", settings.session_dir, False),  # 会话目录
-        ("WECHAT_COOKIE_PATH", settings.wechat_cookie_path, False),  # 公众号 Cookie 路径
-        ("ZHIHU_COOKIE_PATH", settings.zhihu_cookie_path, False),  # 知乎 Cookie 路径
+        ("SESSION_DIR", settings.session_dir, True),  # 会话目录包含 Cookie，视为敏感
+        ("WECHAT_COOKIE_PATH", settings.wechat_cookie_path, True),  # 公众号 Cookie 路径
+        ("ZHIHU_COOKIE_PATH", settings.zhihu_cookie_path, True),  # 知乎 Cookie 路径
         ("PW_TIMEOUT_MS", str(settings.playwright_timeout_ms), False),  # 浏览器超时
         ("PW_SLOWMO_MS", str(settings.playwright_slowmo_ms), False),  # 慢动作毫秒
         ("PW_SHOT_DIR", settings.playwright_screenshot_dir, False),  # 截图目录
         ("PW_TRACING", str(settings.playwright_tracing), False),  # tracing 开关
         ("OpenAI Key", settings.openai_api_key, True),  # OpenAI 凭据需脱敏
+        ("Dashboard JWT Secret", settings.dashboard_jwt_secret, True),  # Dashboard JWT 密钥
         ("WeChat Cookie", settings.wechat_mp_cookie or "", True),  # 微信凭据
         ("Zhihu Cookie", settings.zhihu_cookie or "", True),  # 知乎凭据
         ("Medium Token", settings.medium_token or "", True),  # Medium 凭据
         ("WordPress URL", settings.wp_url or "", False),  # WordPress 站点信息
+        ("管理员初始化令牌", settings.admin_init_token or "", True),  # 初始化令牌需脱敏
         ("日志级别", LOG_LEVEL, False),  # 当前日志级别
     ]  # 列表定义结束
 

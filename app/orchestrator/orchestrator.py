@@ -16,6 +16,7 @@ from app.db.migrate import SessionLocal  # 获取 Session 工厂
 from app.orchestrator import parsers, ssh_runner, vps_job_packager  # 引入 orchestrator 子模块
 from app.generator.article_generator import lease_theme_for_run, release_theme_lock  # TODO: 导入软锁操作
 from app.generator.persistence import insert_article_tx  # 新增导入用于执行去重与事务落库
+from app.plugins.loader import apply_filter_hooks  # 引入插件过滤 Hook
 from app.utils.logger import get_logger  # 引入统一日志模块
 
 LOGGER = get_logger(__name__)  # 初始化模块日志记录器
@@ -105,6 +106,7 @@ def plan_topics(session: Session, target_count: int, cooldown_days: int) -> List
             "work": character_info["work"],
             "keyword": keyword_record.keyword,
         }  # 组装主题结构
+        topic = apply_filter_hooks("on_before_generate", topic)  # 插件可修改选题
         plan.append(topic)  # 收录主题
         if len(plan) >= target_count:  # 达到目标数量
             break  # 结束循环

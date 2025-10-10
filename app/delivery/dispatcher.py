@@ -12,6 +12,7 @@ from app.utils.logger import get_logger  # 引入统一日志模块
 
 from app.delivery.registry import get_registry  # 加载适配器注册表
 from app.delivery.types import DeliveryResult  # 引入统一返回结构
+from app.plugins.loader import run_exporter_hook  # 引入插件导出 Hook
 
 
 def _next_backoff(base_seconds: int, attempt: int) -> int:
@@ -146,6 +147,7 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                 platform,
                 attempts_so_far + 1,
             )
+            run_exporter_hook("on_before_publish", article, platform)  # 投递前触发插件 Hook
             res = adapter(article, settings)  # 调用适配器
             payload_json = json.dumps(res.payload or {}, ensure_ascii=False)  # 序列化 payload
             ok_flag = res.status in {"prepared", "queued", "success"}  # 判断成功
@@ -251,6 +253,11 @@ def deliver_article_to_all(db: Session, settings, article_id: int) -> Dict[str, 
                     platform,
                 )
                 raise  # 继续抛出异常
+            run_exporter_hook(
+                "on_after_publish",
+                {"article_id": article_id, "status": res.status, "target": res.target_id},
+                platform,
+            )  # 投递完成后触发插件 Hook
             results[platform] = res  # 记录结果
         except Exception as exc:  # 捕获适配器异常
             attempts_now = attempts_so_far + 1  # 累加次数

@@ -1,0 +1,30 @@
+# 心理学影评 Profile 示例
+name: psy_film_daily  # Profile 名称
+enabled: true  # 启用状态
+
+generation:
+  articles_per_day: 5  # 每日生成篇数
+  target_words: 2000  # 每篇目标字数
+  llm_preset: "meta/llama3.1-70b-instruct"  # 模型预设
+  dedup:
+    check_title: true  # 检查标题重复
+    check_role_work_pair: true  # 检查角色作品组合
+    hamming_threshold: 0.85  # 哈明距离阈值
+  theme_pool:
+    - 情绪调节  # 主题样例
+    - 影视疗愈  # 主题样例
+
+delivery:
+  platforms:
+    - wechat_mp  # 微信公众号
+    - zhihu  # 知乎
+  window:
+    start: "09:00"  # 发布窗口开始
+    end: "12:00"  # 发布窗口结束
+  retries:
+    enable: true  # 是否允许窗口外重试
+
+playwright:
+  headless: true  # 无头模式
+  slowmo_ms: 0  # 慢动作延迟
+  user_agent: "AutoWriter/round7"  # 自定义 UA
