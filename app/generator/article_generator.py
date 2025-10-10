@@ -6,7 +6,7 @@ import json  # 读取风格配置文件
 import random  # 提供随机选择心理特质的能力
 from collections.abc import Mapping, Sequence  # 处理嵌套风格指令
 from datetime import datetime, timedelta, timezone  # TODO: 支持软锁过期计算
-from typing import Any, Dict, Optional  # 描述文章返回结构
+from typing import Any, Dict, Mapping, Optional  # 描述文章返回结构
 
 import structlog  # 结构化日志记录器，便于追踪生成状态
 from sqlalchemy import text  # TODO: 引入 text 以执行原生 SQL
@@ -15,12 +15,20 @@ from sqlalchemy.orm import Session  # 类型提示，便于静态检查
 from config.settings import BASE_DIR, settings  # TODO: 引入 settings 读取软锁配置
 from app.db.migrate import SessionLocal  # 数据库会话工厂
 from app.generator import character_selector  # 角色选择工具模块
+from app.prompting.registry import (  # Prompt 选择工具
+    choose_prompt_variant,
+    get_prompt,
+    list_variants,
+)
+from app.prompting.guards import evaluate_quality  # 质量闸门
 
 LOGGER = structlog.get_logger()  # 初始化日志器
 ARTICLE_PROMPT_PATH = (  # 心理学影评提示词模板路径
     BASE_DIR / "app" / "generator" / "prompts" / "article_prompt_template.txt"
 )  # 通过路径拼装定位模板
 STYLE_PROFILE_PATH = BASE_DIR / "app" / "generator" / "style_profile.json"  # 风格配置文件路径
+MAX_VARIANT_ATTEMPTS = 3  # 最多尝试的 Prompt Variant 次数
+MAX_ARTICLE_LENGTH = 2300  # 输出字数上限保持与质量闸门一致
 
 
 def lease_theme_for_run(db: Session, run_id: str) -> Optional[dict]:
@@ -195,7 +203,12 @@ class ArticleGenerator:
             )
             return detail
 
-    def generate_article(self, topic: str, style_key: str = "psychology_analysis") -> Dict[str, str]:
+    def generate_article(
+        self,
+        topic: str,
+        style_key: str = "psychology_analysis",
+        profile_config: Mapping[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         """根据主题生成文章草稿。"""
 
         template = self._load_prompt_template()  # 加载提示词模板
@@ -213,27 +226,109 @@ class ArticleGenerator:
             "{{TAGS}}": chosen_trait,
         }
         replacements.update(style_replacements)  # 合并风格指令占位符
-        article_body = template  # 初始化文章正文为模板内容
-        for placeholder, value in replacements.items():  # 遍历占位符完成替换
-            article_body = article_body.replace(placeholder, value)
+        prompt_section = (profile_config or {}).get("prompting", {})  # 读取 Profile 中的 Prompt 策略
+        strategy_config = prompt_section.get("strategy") if isinstance(prompt_section, Mapping) else {}
+        max_attempts = int(prompt_section.get("max_attempts", MAX_VARIANT_ATTEMPTS)) if isinstance(prompt_section, Mapping) else MAX_VARIANT_ATTEMPTS  # 读取最大尝试次数
+        available_variants = list(list_variants())  # 列出全部 Prompt Variant
+        if not available_variants:  # 若缺少 Prompt 模板
+            raise RuntimeError("缺少 Prompt 模板，请在 app/prompting/prompts 目录下添加至少一个文件。")
+
+        attempt_logs: list[Dict[str, Any]] = []  # 记录每轮质量评估结果
+        chosen_variant: str | None = None  # 最终使用的 Variant
+        final_report = None  # 记录最终的质量报告
+        last_report = None  # 保存最近一次报告供失败时引用
+        article_body = ""  # 初始化正文
+        manual_review = False  # 标记是否进入人工复核
+
+        tried: set[str] = set()  # 跟踪已尝试的 Variant
+        for attempt in range(max(1, min(max_attempts, len(available_variants)))):  # 控制尝试次数
+            if attempt == 0:  # 首次尝试按照策略选择
+                variant, prompt_text = choose_prompt_variant(profile_config or {}, strategy_config)
+            else:  # 后续尝试按未使用的 Variant 顺序回退
+                fallback_candidates = [variant for variant in available_variants if variant not in tried]
+                if not fallback_candidates:  # 若已尝试所有 Variant，则回退至轮询
+                    variant, prompt_text = choose_prompt_variant(profile_config or {}, strategy_config)
+                else:
+                    variant = fallback_candidates[0]
+                    prompt_text = get_prompt(variant)
+            tried.add(variant)  # 记录已尝试 Variant
+
+            prompt_instructions = "\n".join(  # 清洗 Prompt 文本，去除注释行
+                line for line in prompt_text.splitlines() if not line.strip().startswith("#")
+            ).strip()
+            rendered_body = template  # 从模板复制一份用于替换
+            for placeholder, value in replacements.items():  # 遍历占位符完成替换
+                rendered_body = rendered_body.replace(placeholder, value)
+            article_body = f"{prompt_instructions}\n\n{rendered_body}" if prompt_instructions else rendered_body  # 将 Prompt 指令前置便于审计
+            if len(article_body) > MAX_ARTICLE_LENGTH:  # 控制输出字数上限
+                article_body = article_body[:MAX_ARTICLE_LENGTH]
+
+            title = (
+                f"{theme.get('psychology_keyword', '心理学主题')}是一种{theme.get('psychology_definition', '概念')} —— "
+                f"{character_profile['name']}（{character_profile['work']}）"
+            )  # 构造模拟标题
+
+            with self._get_session() as session:  # 打开数据库会话供重复度检查
+                report = evaluate_quality(
+                    article_body,
+                    title=title,
+                    keywords=[
+                        theme.get("psychology_keyword", "心理学主题"),
+                        character_profile["name"],
+                        character_profile["work"],
+                    ],
+                    session=session,
+                )
+
+            attempt_logs.append(
+                {
+                    "variant": variant,
+                    "scores": report.scores,
+                    "reasons": report.reasons,
+                    "passed": report.passed,
+                }
+            )  # 记录本轮结果
+            last_report = report  # 更新最近一次报告
+
+            LOGGER.info(
+                "prompt_attempt",
+                topic=topic,
+                theme_id=theme.get("id"),
+                variant=variant,
+                passed=report.passed,
+                scores=report.scores,
+                reasons=report.reasons,
+            )  # 记录 Prompt 尝试日志
+
+            if report.passed:  # 若本轮通过质量闸门
+                chosen_variant = variant
+                final_report = report
+                break
+
+        if final_report is None:  # 所有 Variant 均未通过
+            manual_review = True
+            chosen_variant = attempt_logs[-1]["variant"] if attempt_logs else None
+            final_report = last_report
+
+        fallback_count = max(0, len(attempt_logs) - 1)  # 统计回退次数
+
         LOGGER.info(  # 记录生成完成日志，方便追踪主题与字数
             "article_generated",
             topic=topic,
             content_length=len(article_body),
             theme_id=theme.get("id"),
+            variant=chosen_variant,
+            manual_review=manual_review,
         )
-        title = (  # 构造模拟文章标题
-            f"{theme.get('psychology_keyword', '心理学主题')}是一种{theme.get('psychology_definition', '概念')} —— "
-            f"{character_profile['name']}（{character_profile['work']}）"
-        )
+
         result = {
-            "title": title,  # 模拟生成文章标题
-            "content": article_body,  # 模拟生成文章正文
+            "title": title,
+            "content": article_body,
             "keywords": [
                 theme.get("psychology_keyword", "心理学主题"),
                 character_profile["name"],
                 character_profile["work"],
-            ],  # 根据主题构造关键词列表
+            ],
             "theme": {
                 "id": theme.get("id"),
                 "topic": topic,
@@ -241,6 +336,16 @@ class ArticleGenerator:
                 "show": character_profile["work"],
                 "definition": theme.get("psychology_definition"),
             },
+            "prompt_variant": chosen_variant,
+            "quality_audit": {
+                "variant": chosen_variant,
+                "scores": final_report.scores if final_report else {},
+                "reasons": final_report.reasons if final_report else [],
+                "passed": bool(final_report.passed) if final_report else False,
+                "fallback_count": fallback_count,
+                "attempts": attempt_logs,
+            },
+            "manual_review": manual_review,
         }
 
         with self._get_session() as session:

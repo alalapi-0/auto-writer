@@ -389,3 +389,32 @@ make run-local-orchestrator DATE=2025-10-02 ARTICLES=3
 - Worker 心跳超过两倍轮询间隔时，Dashboard 会将对应行标红提示掉线。
 - `/metrics` 端点中的 Prometheus 指标会随着任务成功、失败与重试实时更新。
 - Electron 客户端关闭时应确认所有子进程被正确回收，不留下残留会话或僵尸进程。
+
+## 17. Prompt 策略与质量闸门（R5）
+### Prompt 版本管理与权重配置
+- 新增 Prompt 模板请放在 `app/prompting/prompts/` 目录，文件名即 Variant 名称（如 `v1_academic_cn.txt`）。
+- 模板会被注册中心自动加载，无需修改代码；建议在文件首行写明用途与风格备注，方便实验对照。
+- Profile 可通过 `prompting` 配置段落指定策略与流量，例如：
+  ```yaml
+  prompting:
+    max_attempts: 3        # 单篇文章最多尝试的 Prompt 数
+    strategy:
+      name: weighted      # round_robin / weighted / by_profile / traffic_split
+      weights:
+        v1_academic_cn: 0.6
+        v2_academic_cn_tighter: 0.4
+  ```
+- `by_profile` 支持按 Profile 名称/ID 指定 Variant，也可嵌套其它策略形成更复杂的分流逻辑。
+
+### 质量闸门指标与阈值
+- **字数**：目标区间为 1800–2300 字，超出范围会立即触发下一 Variant 或人工复核。
+- **可读性**：综合平均句长（≤45 字）、段落密度（约 4 句/段）与停用词占比，得分低于 0.6 判定失败。
+- **风格一致性**：统计高频词与风格词典的覆盖率/密度，得分低于 0.5 时提示补充术语。
+- **重复度**：默认使用 `scikit-learn` TF-IDF 余弦相似度（>0.8 视为重复），在缺少依赖时回退到 Jaccard 指标。
+- **敏感模式**：命中呼吁性语言、第一人称或台词引用会直接置零并要求人工介入。
+- `ContentAudit` 表保存最终分数、原因、全部 Variant 尝试明细与回退次数，Dashboard 新增的“Prompt 实验”页可实时查看并导出 CSV。
+
+### 风格词典与历史文章对齐
+- 自定义风格词典位于 `data/style_words.txt`（一行一个词）；文件不随仓库提交，可在部署时挂载。
+- 质量闸门会自动读取该词典，计算风格覆盖率；建议将用户历史文章的高频词导入此文件以增强风格一致性评分。
+- 若需要临时调整风格，只需更新该文件并重启服务即可，无需修改代码。
