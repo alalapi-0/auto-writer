@@ -20,6 +20,10 @@ from app.db.migrate_sched import run_migrations, sched_session_scope  # 调度�
 from app.db.models_sched import JobRun, MetricEvent, Schedule, User  # ORM 模型
 from app.scheduler.api import list_schedules, pause_schedule, resume_schedule, run_now  # 调度控制
 from app.utils.logger import get_logger  # 日志工具
+from app.telemetry.metrics import (  # Prometheus 指标工具
+    PROMETHEUS_ENABLED,  # 指标开关
+    generate_latest_metrics,  # 序列化指标函数
+)  # 导入结束
 
 LOGGER = get_logger(__name__)  # 初始化日志
 
@@ -27,6 +31,16 @@ app = FastAPI(title="AutoWriter Dashboard")  # 创建 FastAPI 应用
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))  # 模板目录
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")  # 挂载静态目录
+
+
+if PROMETHEUS_ENABLED:  # 当启用 Prometheus 时注册指标路由
+
+    @app.get("/metrics")  # 暴露指标的 HTTP 路由
+    def metrics_endpoint() -> Response:  # 指标路由处理函数
+        """返回 Prometheus 指标内容。"""  # 中文说明
+
+        body, content_type = generate_latest_metrics()  # 获取指标字节串与类型
+        return Response(content=body, media_type=content_type)  # 构造响应
 
 
 @app.on_event("startup")  # 注册启动事件

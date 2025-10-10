@@ -23,3 +23,4 @@ fastapi>=0.115.0  # 新增: Dashboard 后端框架
 uvicorn>=0.30.0  # 新增: FastAPI 开发服务器
 passlib[bcrypt]>=1.7.0  # 新增: 用户密码哈希工具
 python-jose[cryptography]>=3.3.0  # 新增: JWT 令牌生成与校验
+prometheus-client>=0.20  # 新增: Prometheus 指标导出

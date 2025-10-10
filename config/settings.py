@@ -85,6 +85,7 @@ TZ_DEFAULT = os.getenv("TZ", "Asia/Tokyo")  # 新增: 调度与展示统一时�
 DASHBOARD_BIND_DEFAULT = os.getenv("DASHBOARD_BIND", "127.0.0.1:8787")  # 新增: Dashboard 监听地址
 DASHBOARD_JWT_SECRET_VALUE = os.getenv("DASHBOARD_JWT_SECRET", "")  # 新增: Dashboard JWT 密钥
 DASHBOARD_ENABLE_REMOTE_DEFAULT = _get_env_bool("DASHBOARD_ENABLE_REMOTE", False)  # 新增: 是否允许远程访问
+PROMETHEUS_ENABLED_DEFAULT = _get_env_bool("PROMETHEUS_ENABLED", True)  # 新增: Prometheus 指标导出开关
 INGEST_ENDPOINT_DEFAULT = os.getenv("INGEST_ENDPOINT", "http://127.0.0.1:8787/api/ingest")  # 新增: 遥测上报地址
 SCHED_ENABLE_DEFAULT = _get_env_bool("SCHED_ENABLE", True)  # 新增: 是否启动调度
 SCHED_MAX_PARALLEL_DEFAULT = _get_env_int("SCHED_MAX_PARALLEL", 1)  # 新增: 同一 profile 并行度
@@ -185,6 +186,7 @@ class Settings:
     metrics_buffer_max: int = METRICS_BUFFER_MAX_DEFAULT  # 新增: 遥测缓冲上限
     jwt_access_expire_min: int = JWT_ACCESS_EXPIRE_MIN_DEFAULT  # 新增: JWT 过期时间
     admin_init_token: str = ADMIN_INIT_TOKEN_DEFAULT  # 新增: 首次管理员初始化令牌
+    prometheus_enabled: bool = PROMETHEUS_ENABLED_DEFAULT  # 新增: Prometheus 指标开关
 
     # === 平台开关与凭据 ===
     enable_wechat_mp: bool = False  # TODO: 微信公众号默认关闭
@@ -263,6 +265,18 @@ class Settings:
         """向后兼容属性，返回 orchestrator 时区。"""
 
         return self.tz or self.orchestrator.timezone
+
+    @property
+    def PROMETHEUS_ENABLED(self) -> bool:
+        """提供大写属性以兼容遥测模块读取。"""
+
+        return self.prometheus_enabled
+
+    @PROMETHEUS_ENABLED.setter
+    def PROMETHEUS_ENABLED(self, value: bool) -> None:
+        """允许运行时调整 Prometheus 指标开关。"""
+
+        object.__setattr__(self, "prometheus_enabled", value)
 
     def validate_credentials(self) -> List[str]:
         """对已启用的平台做“必填/形状”校验，返回错误列表。"""
