@@ -14,6 +14,7 @@ markdown-it-py==3.0.0  # Markdown 渲染为 HTML
 pyperclip==1.9.0  # 跨平台剪贴板复制
 beautifulsoup4==4.12.3  # HTML 清洗
 rapidfuzz==3.6.1  # 文本相似度计算
-PySide6==6.7.1  # 桌面应用框架 Qt for Python
+PySide6>=6.7  # 桌面应用框架 Qt for Python (版本下限依照 Round 6 要求)
 pyinstaller==6.6.0  # 桌面应用打包
 jinja2==3.1.4  # 模板渲染（保持原有依赖）
+qdarkstyle>=3.2  # 深色主题样式库
