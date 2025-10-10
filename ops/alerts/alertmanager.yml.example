@@ -1,0 +1,66 @@
+# Alertmanager 样例配置，需配合 --config.expand-env 以支持环境变量注入。  # 说明
+# 所有 URL、凭据均通过环境变量提供，示例不包含真实密钥。  # 注意
+
+global:  # 全局配置
+  resolve_timeout: 5m  # 告警恢复判定超时
+
+route:  # 顶级路由配置
+  receiver: default-webhook  # 默认接收器
+  group_by: ['alertname', 'team']  # 告警聚合标签
+  group_wait: 30s  # 首次分组等待
+  group_interval: 5m  # 同一分组重复发送间隔
+  repeat_interval: 4h  # 告警重复发送间隔
+  routes:  # 子路由配置
+    - matchers:  # 匹配严重级别为 critical 的告警
+        - severity="critical"  # 匹配条件
+      receiver: feishu-webhook  # 飞书通道
+    - matchers:  # 匹配需要 Slack 通知的标签
+        - channel="slack"  # 自定义标签
+      receiver: slack-webhook  # Slack 通道
+    - matchers:  # 匹配需要邮件通知的标签
+        - notify="email"  # 自定义标签
+      receiver: email-smtp  # 邮件通道
+
+receivers:  # 接收器列表
+  - name: default-webhook  # 默认通用 Webhook
+    webhook_configs:  # Webhook 配置
+      - url: ${ALERT_GENERIC_WEBHOOK_URL}  # 通用 Webhook 地址
+        max_alerts: 10  # 单次推送最大告警数
+        send_resolved: true  # 发送恢复通知
+        http_config:  # HTTP 客户端配置
+          follow_redirects: true  # 允许重定向
+          bearer_token: ${ALERT_GENERIC_BEARER_TOKEN}  # 可选 Bearer Token
+
+  - name: feishu-webhook  # 飞书接收器
+    webhook_configs:  # Webhook 列表
+      - url: ${ALERT_FEISHU_WEBHOOK_URL}  # 飞书群机器人地址
+        send_resolved: true  # 发送恢复通知
+        http_config:  # HTTP 配置
+          follow_redirects: true  # 允许重定向
+          tls_config:  # TLS 配置
+            insecure_skip_verify: ${ALERT_FEISHU_SKIP_TLS_VERIFY}  # 按需忽略证书校验
+        # 若需签名，请通过环境变量传入签名密钥并在 webhook/notify_feishu.py 中计算。  # 提示
+
+  - name: slack-webhook  # Slack 接收器
+    webhook_configs:  # Webhook 配置
+      - url: ${ALERT_SLACK_WEBHOOK_URL}  # Slack Incoming Webhook 地址
+        send_resolved: true  # 发送恢复通知
+        http_config:  # HTTP 配置
+          follow_redirects: true  # 允许重定向
+          proxy_url: ${ALERT_SLACK_PROXY_URL}  # 可选代理
+
+  - name: email-smtp  # 邮件接收器
+    email_configs:  # 邮件配置
+      - to: ${ALERT_EMAIL_TO}  # 收件人
+        from: ${ALERT_EMAIL_FROM}  # 发件人
+        smarthost: ${ALERT_SMTP_HOST}:${ALERT_SMTP_PORT}  # SMTP 地址与端口
+        auth_username: ${ALERT_SMTP_USERNAME}  # SMTP 用户
+        auth_password: ${ALERT_SMTP_PASSWORD}  # SMTP 密码
+        require_tls: true  # 强制 TLS
+        send_resolved: true  # 发送恢复通知
+        html: '{{ template "email.default.html" . }}'  # 默认 HTML 模板
+
+inhibit_rules:  # 抑制规则
+  - source_matchers: ['severity="critical"']  # 关键告警
+    target_matchers: ['severity="warning"']  # 抑制目标
+    equal: ['alertname', 'team']  # 相同标签时抑制

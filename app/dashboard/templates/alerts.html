@@ -1,0 +1,108 @@
+<!DOCTYPE html> <!-- 告警面板页面文档类型 -->
+<html lang="zh"> <!-- 指定中文语言 -->
+<head> <!-- 头部开始 -->
+  <meta charset="utf-8" /> <!-- 编码 -->
+  <title>告警面板</title> <!-- 页面标题 -->
+  <link rel="stylesheet" href="/static/style.css" /> <!-- 通用样式 -->
+</head> <!-- 头部结束 -->
+<body> <!-- 主体开始 -->
+  <main> <!-- 主区域 -->
+    <h1>告警面板</h1> <!-- 页面主标题 -->
+    <nav class="toolbar"> <!-- 导航工具栏 -->
+      <a href="/">返回概览</a> <!-- 概览入口 -->
+    </nav> <!-- 导航结束 -->
+    <section class="filters"> <!-- 过滤器区域 -->
+      <label for="label-filter">标签过滤</label> <!-- 标签过滤标题 -->
+      <input id="label-filter" type="text" placeholder="severity:critical,team:platform" /> <!-- 标签输入框 -->
+      <label for="status-filter">状态</label> <!-- 状态选择标题 -->
+      <select id="status-filter"> <!-- 状态下拉框 -->
+        <option value="">全部</option> <!-- 默认全部 -->
+        <option value="firing">firing</option> <!-- 进行中 -->
+        <option value="pending">pending</option> <!-- 待触发 -->
+      </select> <!-- 下拉结束 -->
+      <button id="reload">刷新</button> <!-- 刷新按钮 -->
+    </section> <!-- 过滤器结束 -->
+    <table class="alerts-table"> <!-- 告警表格 -->
+      <thead> <!-- 表头 -->
+        <tr> <!-- 表头行 -->
+          <th>状态</th> <!-- 状态列 -->
+          <th>名称</th> <!-- 名称列 -->
+          <th>级别</th> <!-- 级别列 -->
+          <th>摘要</th> <!-- 摘要列 -->
+          <th>标签</th> <!-- 标签列 -->
+          <th>起止</th> <!-- 起止时间列 -->
+          <th>链接</th> <!-- 链接列 -->
+        </tr> <!-- 表头行结束 -->
+      </thead> <!-- 表头结束 -->
+      <tbody id="alert-body"> <!-- 表体 -->
+        <tr><td colspan="7">加载中...</td></tr> <!-- 初始占位 -->
+      </tbody> <!-- 表体结束 -->
+    </table> <!-- 表格结束 -->
+  </main> <!-- 主区域结束 -->
+  <script> // 页面脚本开始
+  const API_ENDPOINT = "{{ api_endpoint }}"; // 模板注入的 API 地址
+  const bodyEl = document.getElementById('alert-body'); // 获取表格容器
+  const labelInput = document.getElementById('label-filter'); // 标签输入框
+  const statusSelect = document.getElementById('status-filter'); // 状态下拉框
+  const reloadBtn = document.getElementById('reload'); // 刷新按钮
+
+  function buildQuery() { // 构造查询参数
+    const params = new URLSearchParams(); // 初始化参数
+    const labels = labelInput.value.split(',').map(item => item.trim()).filter(Boolean); // 解析标签
+    for (const label of labels) { // 遍历标签
+      params.append('labels', label); // 添加到参数
+    }
+    if (statusSelect.value) { // 若选择状态
+      params.set('status', statusSelect.value); // 添加状态
+    }
+    return params.toString(); // 返回查询字符串
+  }
+
+  async function loadAlerts() { // 拉取告警
+    const token = localStorage.getItem('jwt'); // 读取 JWT
+    if (!token) { // 未登录时
+      bodyEl.innerHTML = '<tr><td colspan="7">请先登录</td></tr>'; // 显示提示
+      return; // 退出
+    }
+    bodyEl.innerHTML = '<tr><td colspan="7">加载中...</td></tr>'; // 设置加载状态
+    try { // 捕获错误
+      const query = buildQuery(); // 构造查询
+      const resp = await fetch(`${API_ENDPOINT}${query ? `?${query}` : ''}`, { // 发起请求
+        headers: { Authorization: `Bearer ${token}` }, // 传入授权
+      });
+      if (!resp.ok) { // 非 200 响应
+        throw new Error('加载失败'); // 抛出异常
+      }
+      const data = await resp.json(); // 解析 JSON
+      if (!data.items.length) { // 无数据
+        bodyEl.innerHTML = '<tr><td colspan="7">暂无告警</td></tr>'; // 提示
+        return; // 退出
+      }
+      bodyEl.innerHTML = data.items.map((item) => { // 渲染表格
+        const labels = Object.entries(item.labels || {}).map(([k, v]) => `${k}=${v}`).join('<br/>'); // 标签
+        const summary = item.annotations?.summary || item.annotations?.description || '无描述'; // 摘要
+        const timeRange = `${item.startsAt || '-'}<br/>${item.endsAt || '-'}`; // 起止
+        const link = item.generatorURL ? `<a href="${item.generatorURL}" target="_blank" rel="noreferrer">打开</a>` : '-'; // 链接
+        return `
+          <tr>
+            <td>${item.status}</td>
+            <td>${item.labels?.alertname || '未知'}</td>
+            <td>${item.labels?.severity || '-'}</td>
+            <td>${summary}</td>
+            <td>${labels}</td>
+            <td>${timeRange}</td>
+            <td>${link}</td>
+          </tr>
+        `; // 返回模板
+      }).join(''); // 合并字符串
+    } catch (err) { // 捕获异常
+      console.error(err); // 控制台记录
+      bodyEl.innerHTML = '<tr><td colspan="7">加载失败，请稍后重试</td></tr>'; // 显示错误
+    }
+  }
+
+  reloadBtn.addEventListener('click', loadAlerts); // 注册刷新事件
+  loadAlerts(); // 首次加载
+  </script> <!-- 脚本结束 -->
+</body> <!-- 主体结束 -->
+</html> <!-- 文档结束 -->

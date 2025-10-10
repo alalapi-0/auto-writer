@@ -279,6 +279,32 @@ make run
 - 指标包含运行总数、生成次数、按平台投递结果、作业耗时直方图与插件错误计数，便于构建成功率与耗时趋势图。
 - **生产环境注意**：仅在本机或内网暴露 `/metrics`，建议结合反向代理、mTLS 或防火墙限制访问来源，避免指标接口被滥用。
 
+### 告警规则与通知脚本
+- 目录 `ops/alerts/` 提供 Prometheus/Alertmanager 配置模板与脚本：
+  - `prometheus.rules.yml` 定义 Dashboard 宕机、队列积压、死信激增、Worker 心跳超时与投递失败率等告警，默认阈值可按业务规模调整。
+  - `alertmanager.yml.example` 演示如何按严重级别路由到飞书、Slack、通用 Webhook 与 SMTP 邮件，所有凭据通过环境变量注入（启动 Alertmanager 时需加 `--config.expand-env`）。
+  - `webhook/notify_*.py` 与 `smtp/send_mail.py` 基于 FastAPI + httpx/smtplib，支持重试、从标准输入触发，以及通过 `uvicorn ops.alerts.webhook.notify_feishu:APP --reload` 等方式运行成 Webhook 服务。
+- 将 `prometheus.rules.yml` 挂载到 Prometheus 容器示例：
+  ```bash
+  docker run -v "$(pwd)/ops/alerts/prometheus.rules.yml:/etc/prometheus/rules/autowriter.yml" \
+    -v "$(pwd)/config/prometheus.yml:/etc/prometheus/prometheus.yml" prom/prometheus
+  ```
+  在主配置内追加 `rule_files: ['/etc/prometheus/rules/*.yml']` 即可加载该规则。
+- 使用 `alertmanager.yml.example` 启动 Alertmanager：
+  ```bash
+  export ALERT_FEISHU_WEBHOOK_URL=https://open.feishu.cn/...
+  export ALERT_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+  docker run --env-file .env.alerts \
+    -v "$(pwd)/ops/alerts/alertmanager.yml.example:/etc/alertmanager/alertmanager.yml" \
+    prom/alertmanager --config.expand-env
+  ```
+  也可在本地执行 `./alertmanager --config.file=ops/alerts/alertmanager.yml.example --config.expand-env` 进行快速测试。
+- Webhook/SMTP 脚本接入方式：
+  - Webhook：在 Alertmanager 中将 `url` 指向 `http://<host>:<port>/webhook`，通过环境变量设置下游地址和 Token；脚本自带 CLI，可 `cat payload.json | python ops/alerts/webhook/notify_generic.py` 验证。
+  - 邮件：`smtp/send_mail.py` 读取 `ALERT_SMTP_HOST/PORT/USERNAME/PASSWORD` 等变量，支持纯文本 + HTML，同时支持 `ALERT_SMTP_USE_SSL`、`ALERT_SMTP_USE_STARTTLS` 控制传输安全。
+- Dashboard 新增 `/alerts` 只读页面，`ALERTS_PULL_ENDPOINT` 环境变量可指向 Alertmanager `api/v2/alerts` 或自建聚合服务，用于在内网浏览当前 firing/pending 告警。
+- **合规提示**：Alertmanager Webhook/SMTP 凭据必须存放在内网与密钥管理系统中，脚本默认不写入硬编码密钥；请限制告警接口只在公司 VPN 或受控子网中暴露。
+
 ## 11. 开发、测试与质量
 - 常用命令：
   - `make lint`：运行 Ruff 检查与格式化。
