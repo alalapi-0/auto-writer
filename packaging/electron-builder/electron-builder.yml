@@ -1,0 +1,36 @@
+# Electron Builder 最小配置示例，包含基础元数据与占位设置。# 中文说明
+appId: com.autowriter.dev.shell  # 应用唯一标识占位，实际项目可调整。# 中文说明
+productName: AutoWriter Dev Shell  # 产品显示名称占位。# 中文说明
+directories:  # 指定资源目录。# 中文说明
+  app: apps/desktop-electron  # 指向 Electron 应用源码所在目录。# 中文说明
+  output: dist  # 打包输出目录占位，CI 干跑不会产生文件。# 中文说明
+files:  # 定义需要被 electron-builder 处理的文件集合。# 中文说明
+  - "package.json"  # 包含项目元数据，确保在构建时可读取。# 中文说明
+  - "app/**/*"  # 包含通用应用源码目录。# 中文说明
+  - "apps/desktop-electron/**/*"  # 仅包含 Electron 应用源码与静态资源。# 中文说明
+asar: false  # 关闭 asar 方便开发调试，生产环境可按需开启。# 中文说明
+publish: never  # 禁止自动发布，符合不产出二进制要求。# 中文说明
+mac:  # macOS 平台配置占位。# 中文说明
+  target: []  # 空数组占位，真实打包时再指定 dmg/pkg 等目标。# 中文说明
+  hardenedRuntime: false  # 默认关闭 Hardened Runtime，签名时可再启用。# 中文说明
+  gatekeeperAssess: false  # 禁止 Gatekeeper 自动校验，实际签名时再调整。# 中文说明
+  identity: null  # 占位身份标识，真实签名时使用环境变量 CSC_NAME。# 中文说明
+  notarize: false  # 占位关闭 notarize，真实流程可用 env:APPLE_ID 等。# 中文说明
+  entitlements: null  # 占位 entitlements，真实使用时可指向 env:MAC_ENTITLEMENTS。# 中文说明
+  extendInfo: {}  # 预留自定义 Info.plist 字段。# 中文说明
+win:  # Windows 平台配置占位。# 中文说明
+  target: []  # 空数组占位，真实打包时再指定 nsis/msi 等目标。# 中文说明
+  signAndEditExecutable: false  # 禁用自动签名，真实打包时配合 CSC_LINK 与 CSC_KEY_PASSWORD。# 中文说明
+  certificateFile: null  # 证书文件占位，建议使用环境变量 CSC_LINK。# 中文说明
+  certificatePassword: "${env:WIN_CSC_KEY_PASSWORD}"  # 证书密码占位，使用环境变量。# 中文说明
+linux:  # Linux 平台配置占位。# 中文说明
+  target: []  # 空数组占位，真实打包时再指定 AppImage/deb/rpm 等目标。# 中文说明
+  category: Utility  # 占位分类，可根据产品调整。# 中文说明
+  executableName: autowriter-dev-shell  # 可执行文件占位名称。# 中文说明
+  desktop:  # Desktop Entry 占位字段。# 中文说明
+    Name: AutoWriter Dev Shell  # 桌面入口显示名称。# 中文说明
+    Comment: 占位说明：部署时请根据实际产品改写。# 中文说明
+    Icon: "${env:LINUX_ICON_PATH}"  # 图标占位，使用环境变量提供。# 中文说明
+extraMetadata:  # 额外 package.json 字段占位。# 中文说明
+  version: "0.1.0"  # 默认版本占位，真实项目请通过 CI 注入。# 中文说明
+  description: "AutoWriter Desktop Electron Shell"  # 占位描述信息。# 中文说明

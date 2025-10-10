@@ -1,0 +1,22 @@
+{
+  // Tauri 配置文件最小结构占位，确保默认不产出制品。// 中文说明
+  "$schema": "https://schema.tauri.app/config/2", // Schema 链接确保编辑器获得智能提示。// 中文说明
+  "package": { // 定义应用包的基本信息。// 中文说明
+    "productName": "AutoWriter Tauri Shell", // 产品名称占位，实际项目可替换。// 中文说明
+    "version": "0.1.0" // 版本号占位，建议通过 CI 注入真实版本。// 中文说明
+  },
+  "tauri": { // Tauri 核心配置段。// 中文说明
+    "bundle": { // 打包配置占位，仅用于结构校验。// 中文说明
+      "active": true, // 启用 bundle 配置，保证结构合法。// 中文说明
+      "targets": [] // 目标数组留空，避免生成任何制品。// 中文说明
+      // "icon": ["${env:TAURI_ICON_PATH}"] // 图标占位：真实打包时通过环境变量传递图标路径。// 中文说明
+      // "identifier": "${env:TAURI_APP_IDENTIFIER}" // 应用标识占位，私有仓库开启打包时设置。// 中文说明
+      // "macOS": { "signingIdentity": "${env:TAURI_MAC_IDENTITY}" } // macOS 签名占位示例。// 中文说明
+      // "windows": { "certificatePath": "${env:TAURI_WIN_CERT}" } // Windows 证书占位示例。// 中文说明
+      // "linux": { "deb": { "depends": [] } } // Linux 打包占位，可在真实场景扩展。// 中文说明
+    }
+  },
+  "security": { // 安全策略段。// 中文说明
+    "csp": "default-src 'self'; script-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'" // 最小化 CSP，允许本地资源与内联样式。// 中文说明
+  }
+}
