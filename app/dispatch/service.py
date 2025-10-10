@@ -11,6 +11,7 @@ from typing import Any, Dict, List  # 类型提示
 from sqlalchemy import and_, func, or_  # 使用 SQL 表达式与布尔组合
 
 from config.settings import settings  # 引入配置
+from app.chaos.hooks import maybe_inject_chaos  # 引入混沌注入钩子
 from app.db.migrate_sched import sched_session_scope  # 调度库会话
 from app.db.models_sched import Heartbeat, JobRun, TaskQueue  # ORM 模型
 from app.utils.logger import get_logger  # 日志工具
@@ -37,6 +38,7 @@ def enqueue_task(
 ) -> TaskQueue:
     """创建队列任务，若提供幂等键则返回已有记录。"""  # 中文说明
 
+    maybe_inject_chaos("dispatch.enqueue")  # 混沌注入: 入队阶段
     if available_at is None:  # 若未指定可领取时间
         available_at = _utcnow()  # 默认立即可领取
     if max_attempts is None:  # 若未指定最大尝试次数
@@ -69,6 +71,7 @@ def enqueue_task(
 def lease_tasks(agent_name: str, limit: int) -> List[TaskQueue]:  # 租约任务
     """按照优先级为指定 Worker 分配任务。"""  # 中文说明
 
+    maybe_inject_chaos("dispatch.lease")  # 混沌注入: 任务租约阶段
     now = _utcnow()  # 当前时间
     leased: List[TaskQueue] = []  # 准备返回列表
     ttl = timedelta(seconds=settings.job_heartbeat_ttl_sec)  # 计算租约过期时间
@@ -155,6 +158,7 @@ def complete_task(
 ) -> TaskQueue:
     """将任务标记为完成并写回运行结果。"""  # 中文说明
 
+    maybe_inject_chaos("dispatch.complete")  # 混沌注入: 完成上报阶段
     now = _utcnow()  # 当前时间
     with dispatch_session_scope() as session:  # 打开分发库
         task = session.query(TaskQueue).filter(TaskQueue.id == task_id).one_or_none()  # 查询任务
@@ -182,6 +186,7 @@ def fail_task(
 ) -> TaskQueue:
     """任务失败后根据重试策略重新入队或标记死亡。"""  # 中文说明
 
+    maybe_inject_chaos("dispatch.fail")  # 混沌注入: 失败上报阶段
     now = _utcnow()  # 当前时间
     backoff = timedelta(seconds=settings.job_retry_backoff_sec)  # 重试退避
     with dispatch_session_scope() as session:  # 打开分发库

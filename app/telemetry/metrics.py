@@ -37,6 +37,12 @@ if PROMETHEUS_ENABLED:  # 当 Prometheus 功能启用时注册指标
         labelnames=("platform", "status"),  # 标签包含平台与状态
         registry=_REGISTRY,  # 绑定注册表
     )  # 计数器定义结束
+    _RATE_LIMIT_COUNTER: Counter = Counter(  # 定义限速触发计数器
+        "autowriter_rate_limit_total",  # 指标名称
+        "AutoWriter 平台限速触发次数",  # 指标帮助文本
+        labelnames=("platform", "reason"),  # 标签包含平台与触发原因
+        registry=_REGISTRY,  # 绑定注册表
+    )  # 计数器定义结束
     _LATENCY_HISTOGRAM: Histogram = Histogram(  # 定义作业耗时直方图
         "autowriter_job_latency_seconds",  # 指标名称
         "AutoWriter 作业从调度到发布的耗时分布",  # 指标帮助文本
@@ -49,12 +55,20 @@ if PROMETHEUS_ENABLED:  # 当 Prometheus 功能启用时注册指标
         labelnames=("plugin",),  # 标签包含插件名称
         registry=_REGISTRY,  # 绑定注册表
     )  # 计数器定义结束
+    _CHAOS_COUNTER: Counter = Counter(  # 定义混沌事件计数器
+        "autowriter_chaos_events_total",  # 指标名称
+        "AutoWriter 混沌注入事件统计",  # 指标帮助文本
+        labelnames=("type", "stage"),  # 标签包含事件类型与阶段
+        registry=_REGISTRY,  # 绑定注册表
+    )  # 计数器定义结束
 else:  # 当 Prometheus 功能关闭时
     _RUN_COUNTER = None  # 运行计数器占位
     _GENERATION_COUNTER = None  # 生成计数器占位
     _DELIVERY_COUNTER = None  # 投递计数器占位
+    _RATE_LIMIT_COUNTER = None  # 限速计数器占位
     _LATENCY_HISTOGRAM = None  # 耗时直方图占位
     _PLUGIN_ERROR_COUNTER = None  # 插件错误计数器占位
+    _CHAOS_COUNTER = None  # 混沌计数器占位
 
 
 def inc_run(status: str, profile: str) -> None:  # 定义运行计数递增函数
@@ -81,6 +95,14 @@ def inc_delivery(platform: str, status: str) -> None:  # 定义投递计数递�
     _DELIVERY_COUNTER.labels(platform=platform, status=status).inc()  # 为对应平台与状态递增
 
 
+def inc_rate_limit(platform: str, reason: str) -> None:  # 定义限速触发递增函数
+    """记录一次限速或时间窗等待事件。"""  # 函数中文文档
+
+    if not PROMETHEUS_ENABLED or _RATE_LIMIT_COUNTER is None:  # 功能关闭时直接返回
+        return  # 不执行任何操作
+    _RATE_LIMIT_COUNTER.labels(platform=platform, reason=reason).inc()  # 根据平台与原因递增
+
+
 def observe_latency(profile: str, seconds: float) -> None:  # 定义耗时观测函数
     """记录完整作业的耗时数据。"""  # 函数中文文档
 
@@ -97,6 +119,14 @@ def inc_plugin_error(plugin: str) -> None:  # 定义插件错误计数递增函�
     _PLUGIN_ERROR_COUNTER.labels(plugin=plugin).inc()  # 为指定插件递增错误计数
 
 
+def inc_chaos_event(event_type: str, stage: str) -> None:  # 定义混沌事件递增函数
+    """记录一次混沌注入事件，便于评估演练频率。"""  # 函数中文文档
+
+    if not PROMETHEUS_ENABLED or _CHAOS_COUNTER is None:  # 功能关闭时直接返回
+        return  # 不执行任何操作
+    _CHAOS_COUNTER.labels(type=event_type, stage=stage).inc()  # 根据类型与阶段递增
+
+
 def generate_latest_metrics() -> Tuple[bytes, str]:  # 定义序列化指标的辅助函数
     """返回 Prometheus 指标的字节串与 Content-Type。"""  # 函数中文文档
 
@@ -109,8 +139,10 @@ __all__ = [  # 导出模块内公开符号
     "PROMETHEUS_ENABLED",  # 暴露配置开关
     "generate_latest_metrics",  # 暴露指标序列化函数
     "inc_delivery",  # 暴露投递计数函数
+    "inc_rate_limit",  # 暴露限速计数函数
     "inc_generation",  # 暴露生成计数函数
     "inc_plugin_error",  # 暴露插件错误计数函数
+    "inc_chaos_event",  # 暴露混沌事件计数函数
     "inc_run",  # 暴露运行计数函数
     "observe_latency",  # 暴露耗时观测函数
 ]  # 导出列表结束

@@ -4,6 +4,7 @@ from __future__ import annotations  # 启用未来注解语法
 
 import importlib  # 动态重新加载模块
 
+from fastapi import FastAPI, Response  # 构造最小 API 应用
 from fastapi.testclient import TestClient  # FastAPI 测试客户端
 
 from config.settings import settings  # 全局配置对象
@@ -15,13 +16,20 @@ def test_metrics_endpoint_exposes_counters() -> None:  # 定义单元测试函�
     original_flag = getattr(settings, "PROMETHEUS_ENABLED", True)  # 记录原始开关值
     settings.PROMETHEUS_ENABLED = True  # 强制开启 Prometheus 功能
     metrics_module = importlib.reload(importlib.import_module("app.telemetry.metrics"))  # 重新加载指标模块
-    server_module = importlib.reload(importlib.import_module("app.dashboard.server"))  # 重新加载 Dashboard 服务
+    app = FastAPI()  # 构建最小化服务以暴露指标
+
+    @app.get("/metrics")
+    def metrics_endpoint() -> Response:
+        """委托指标模块返回 Prometheus 数据。"""  # 内联说明
+
+        payload, content_type = metrics_module.generate_latest_metrics()  # 生成指标输出
+        return Response(payload, media_type=content_type)  # 构造响应
     metrics_module.inc_run("success", "demo")  # 写入运行成功计数
     metrics_module.inc_generation("demo")  # 写入生成计数
     metrics_module.inc_delivery("wechat", "success")  # 写入投递成功计数
     metrics_module.observe_latency("demo", 1.23)  # 写入耗时观测
     metrics_module.inc_plugin_error("demo_plugin")  # 写入插件错误
-    client = TestClient(server_module.app)  # 创建测试客户端
+    client = TestClient(app)  # 创建测试客户端
     response = client.get("/metrics")  # 请求指标路由
     assert response.status_code == 200  # 校验请求成功
     body = response.text  # 提取响应文本

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta  # 导入时间工具用于窗口判断
 from typing import Optional, Tuple, Dict, Any  # 导入类型提示以增强可读性
 from sqlalchemy import text  # 导入 SQL 构造器用于执行原生查询
 from sqlalchemy.orm import Session  # 引入 SQLAlchemy 会话类型
+from app.chaos.hooks import maybe_inject_chaos  # 引入混沌注入钩子
 from app.dedup.textnorm import (  # 从文本归一化模块导入签名与工具函数
     title_signature,
     content_signature,
@@ -93,6 +94,7 @@ def precheck_by_simhash(session: Session, body: str, cfg: DedupConfig) -> Option
 
 def decide_dedup(session: Session, title: str, body: str, role: str, work: str, keyword: str, lang: str, now: datetime, cfg: DedupConfig) -> Dict[str, Any]:  # 定义综合去重判定函数
     """整合三道闸逻辑并返回包含签名与检测结果的字典。"""  # 函数中文文档
+    maybe_inject_chaos("dedup.decide")  # 去重阶段触发混沌演练
     title_sig = title_signature(title)  # 计算标题签名
     content_sig = content_signature(body)  # 计算正文签名
     role_slug, work_slug, psych_keyword, normalized_lang = normalize_entities(role, work, keyword, lang)  # 归一化实体
