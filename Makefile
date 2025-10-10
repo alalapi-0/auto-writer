@@ -32,7 +32,7 @@ run-dashboard:
 
 run-scheduler:
         # 启动调度服务，加载 Profile 并注册 APScheduler 任务
-        python -m app.scheduler.service
+	python -m app.scheduler.service
 
 add-user:
         # 通过 CLI 创建 Dashboard 用户，需指定 USER 环境变量
@@ -74,3 +74,14 @@ publish-one:
 run-gui:
 	# 启动 PySide6 图形界面主入口
 	python -m app.gui.main
+
+run-electron:
+	# 进入 Electron 项目目录安装依赖并启动开发态桌面壳
+	cd apps/desktop-electron && \
+	npm install && \
+	npm run dev
+
+run-all:
+	# 并行启动 Dashboard 与 Scheduler，供调试或独立验证使用
+	python -m app.dashboard.server & \
+	python -m app.scheduler.service
