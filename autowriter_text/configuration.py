@@ -22,7 +22,15 @@ from autowriter_text.logging import logger
 class LLMConfig:
     """大模型相关配置。"""
 
-    provider: Literal["ollama", "vllm", "groq", "fireworks", "hf_endpoint"] = "ollama"
+    provider: Literal[
+        "ollama",
+        "vllm",
+        "groq",
+        "fireworks",
+        "hf_endpoint",
+        "openai",
+        "vps",
+    ] = "ollama"
     model: str = "llama3.1:8b"
     temperature: float = 0.4
     max_tokens: int = 3000
@@ -121,9 +129,26 @@ def load_config() -> AppConfig:
     if isinstance(data, dict):
         config = _merge_config(config, data)
 
+    provider_override = os.getenv("AUTOWRITER_LLM_PROVIDER")
+    if isinstance(provider_override, str) and provider_override.strip():
+        provider_name = provider_override.strip().lower()
+        allowed_providers = {
+            "ollama",
+            "vllm",
+            "groq",
+            "fireworks",
+            "hf_endpoint",
+            "openai",
+            "vps",
+        }
+        if provider_name in allowed_providers:
+            config = config.copy(llm=config.llm.copy(provider=provider_name))
+
     env_mapping = {
         "ollama": "OLLAMA_BASE_URL",
         "vllm": "VLLM_BASE_URL",
+        "openai": "OPENAI_BASE_URL",
+        "vps": "VPS_API_BASE_URL",
     }
     env_key = env_mapping.get(config.llm.provider)
     candidate = os.getenv(env_key) if env_key else None

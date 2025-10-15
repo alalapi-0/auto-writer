@@ -286,12 +286,86 @@ def _hf_endpoint_request(
     return _LLMResponse(text=_extract_text_from_completion(response.json()))
 
 
+def _openai_request(
+    prompt: str,
+    timeout_s: int,
+    config: AppConfig,
+    max_tokens: int,
+    temperature: float,
+) -> _LLMResponse | None:
+    """调用 OpenAI Chat Completions 接口。"""
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        logger.warning("未配置 OPENAI_API_KEY，返回占位文本")
+        return _LLMResponse(text="[openai placeholder response]")
+
+    base_url = config.llm.base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com"
+    payload = _chat_completion_payload(
+        prompt=prompt,
+        model=config.llm.model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    def _do_request() -> httpx.Response:
+        url = base_url.rstrip("/") + "/v1/chat/completions"
+        return httpx.post(url, headers=headers, json=payload, timeout=timeout_s)
+
+    response = _request_with_retry(_do_request)
+    if response is None:
+        return None
+    return _LLMResponse(text=_extract_text_from_chat_completion(response.json()))
+
+
+def _vps_request(
+    prompt: str,
+    timeout_s: int,
+    config: AppConfig,
+    max_tokens: int,
+    temperature: float,
+) -> _LLMResponse | None:
+    """调用自建 VPS 实例暴露的 OpenAI 兼容接口。"""
+
+    api_key = os.getenv("VPS_API_KEY")
+    base_url = config.llm.base_url or os.getenv("VPS_API_BASE_URL")
+    if not api_key or not base_url:
+        logger.warning("VPS API 未正确配置，返回占位文本")
+        return _LLMResponse(text="[vps placeholder response]")
+
+    payload = _chat_completion_payload(
+        prompt=prompt,
+        model=config.llm.model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    def _do_request() -> httpx.Response:
+        url = base_url.rstrip("/") + "/v1/chat/completions"
+        return httpx.post(url, headers=headers, json=payload, timeout=timeout_s)
+
+    response = _request_with_retry(_do_request)
+    if response is None:
+        return None
+    return _LLMResponse(text=_extract_text_from_chat_completion(response.json()))
+
+
 _PROVIDER_REQUESTS: Dict[str, Callable[[str, int, AppConfig, int, float], _LLMResponse | None]] = {
     "ollama": _ollama_request,
     "vllm": _vllm_request,
     "groq": _groq_request,
     "fireworks": _fireworks_request,
     "hf_endpoint": _hf_endpoint_request,
+    "openai": _openai_request,
+    "vps": _vps_request,
 }
 
 
