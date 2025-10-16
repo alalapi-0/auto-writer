@@ -29,7 +29,7 @@ class LLMConfig:
         "fireworks",
         "hf_endpoint",
         "openai",
-        "wps",
+        "vps",
     ] = "ollama"
     model: str = "llama3.1:8b"
     temperature: float = 0.4
@@ -139,7 +139,7 @@ def load_config() -> AppConfig:
             "fireworks",
             "hf_endpoint",
             "openai",
-            "wps",
+            "vps",
         }
         if provider_name in allowed_providers:
             config = config.copy(llm=config.llm.copy(provider=provider_name))
@@ -148,7 +148,7 @@ def load_config() -> AppConfig:
         "ollama": "OLLAMA_BASE_URL",
         "vllm": "VLLM_BASE_URL",
         "openai": "OPENAI_BASE_URL",
-        "wps": "WPS_API_BASE_URL",
+        "vps": "VPS_API_BASE_URL",
     }
     env_key = env_mapping.get(config.llm.provider)
     candidate = os.getenv(env_key) if env_key else None

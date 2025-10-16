@@ -322,20 +322,24 @@ def _openai_request(
     return _LLMResponse(text=_extract_text_from_chat_completion(response.json()))
 
 
-def _wps_request(
+
+def _vps_request(
+
     prompt: str,
     timeout_s: int,
     config: AppConfig,
     max_tokens: int,
     temperature: float,
 ) -> _LLMResponse | None:
-    """调用 WPS AI 兼容接口。"""
 
-    api_key = os.getenv("WPS_API_KEY")
-    base_url = config.llm.base_url or os.getenv("WPS_API_BASE_URL")
+    """调用自建 VPS 实例暴露的 OpenAI 兼容接口。"""
+
+    api_key = os.getenv("VPS_API_KEY")
+    base_url = config.llm.base_url or os.getenv("VPS_API_BASE_URL")
     if not api_key or not base_url:
-        logger.warning("WPS API 未正确配置，返回占位文本")
-        return _LLMResponse(text="[wps placeholder response]")
+        logger.warning("VPS API 未正确配置，返回占位文本")
+        return _LLMResponse(text="[vps placeholder response]")
+
 
     payload = _chat_completion_payload(
         prompt=prompt,
@@ -365,7 +369,8 @@ _PROVIDER_REQUESTS: Dict[str, Callable[[str, int, AppConfig, int, float], _LLMRe
     "fireworks": _fireworks_request,
     "hf_endpoint": _hf_endpoint_request,
     "openai": _openai_request,
-    "wps": _wps_request,
+    "vps": _vps_request,
+
 }
 
 
