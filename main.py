@@ -87,8 +87,10 @@ def _warn_missing_credentials(provider: str) -> None:
 
     if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
         print("[提示] 未检测到 OPENAI_API_KEY，生成时将退回占位内容。")
+
     if provider == "vps" and (not os.getenv("VPS_API_KEY") or not os.getenv("VPS_API_BASE_URL")):
         print("[提示] 未检测到 VPS_API_KEY 或 VPS_API_BASE_URL，生成时将退回占位内容。")
+
 
 
 def _run_automation_flow() -> None:
@@ -128,7 +130,9 @@ def main() -> None:
             "请选择要使用的模型提供商:",
             {
                 "openai": "OpenAI API",
+
                 "vps": "VPS 实例 API",
+
                 "ollama": "Ollama (本地)",
                 "vllm": "vLLM 服务",
                 "groq": "Groq 云端",
