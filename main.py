@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
+from contextlib import closing
+from pathlib import Path
 from typing import Dict
 
 from autowriter_text.configuration import load_config
+from autowriter_text.db import ensure_schema, get_connection
 from autowriter_text.pipeline.run_batch import run_batch
 from cli import cmd_auto
 
@@ -92,6 +96,75 @@ def _warn_missing_credentials(provider: str) -> None:
         print("[提示] 未检测到 VPS_API_KEY 或 VPS_API_BASE_URL，生成时将退回占位内容。")
 
 
+def _check_environment() -> bool:
+    """对运行环境进行一次性检查。"""
+
+    print("\n[环境检查] 正在确认运行所需的基础依赖…")
+    ok = True
+
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    if sys.version_info < (3, 11):
+        print(f"✖ Python 版本过低（当前 {python_version}，要求 ≥ 3.11）。")
+        ok = False
+    else:
+        print(f"✓ Python 版本满足要求：{python_version}")
+
+    env_file = Path(".env")
+    if env_file.exists():
+        print(f"✓ 检测到环境变量文件：{env_file.resolve()}")
+    else:
+        print("⚠️ 未找到 .env 文件，将仅使用系统环境变量。")
+
+    config_path = Path("autowriter_text/config.yaml")
+    if config_path.exists():
+        print(f"✓ 已找到配置文件：{config_path}")
+    else:
+        print("✖ 缺少 autowriter_text/config.yaml，请先根据 README 配置。")
+        ok = False
+
+    try:
+        config = load_config()
+    except Exception as exc:  # noqa: BLE001
+        print(f"✖ 加载配置失败：{exc}")
+        return False
+
+    try:
+        with closing(get_connection()) as conn:
+            ensure_schema(conn)
+            role_count = conn.execute("SELECT COUNT(*) FROM roles").fetchone()[0]
+            keyword_count = conn.execute("SELECT COUNT(*) FROM keywords").fetchone()[0]
+        db_path = Path(config.database_path)
+        print(f"✓ 数据库可访问：{db_path}")
+        if role_count == 0 or keyword_count == 0:
+            print(
+                "⚠️ 角色或关键词表当前为空，批量生成会返回 0 篇，请先执行 make init 或导入基础数据。"
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(f"✖ 数据库检查失败：{exc}")
+        ok = False
+
+    required_dirs = [
+        Path("automation_logs"),
+        Path("exports"),
+        Path("autowriter_text/rejected"),
+    ]
+    for directory in required_dirs:
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            print(f"✓ 目录可写：{directory.resolve()}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"✖ 无法创建或写入目录 {directory}：{exc}")
+            ok = False
+
+    prompt_template = Path("app/generator/prompts/article_prompt_template.txt")
+    if prompt_template.exists():
+        print(f"✓ 文章模板存在：{prompt_template}")
+    else:
+        print("⚠️ 未找到 app/generator/prompts/article_prompt_template.txt，将使用内置 Prompt。")
+
+    _clear_cached_config()
+    return ok
+
 
 def _run_automation_flow() -> None:
     """引导用户选择自动化流程参数。"""
@@ -125,6 +198,9 @@ def main() -> None:
     """程序入口。"""
 
     print("欢迎使用 AutoWriter 主程序 ✨")
+    if not _check_environment():
+        print("环境检查未通过，请根据提示修复后再运行。")
+        return
     while True:
         provider = _prompt_choice(
             "请选择要使用的模型提供商:",
