@@ -9,6 +9,25 @@
 ## 1. 项目简介（AutoWriter 是什么）
 AutoWriter 是一套自动写作骨架，目标是每天根据计划生成约 2000 字的文章，并将草稿投递到多个平台。系统内置调度、去重、日志与适配器机制，为未来接入真实平台 API 打好基础。
 
+### 核心技术栈速览
+- **编程语言**：Python 3.11（核心逻辑与 CLI），部分自动化脚本基于 Playwright。
+- **依赖管理**：`pip + requirements.txt` 与 Poetry/uv 双轨支持，便于在 CI 或桌面环境安装。
+- **任务调度**：APScheduler 负责 cron 级计划任务，另有系统 cron 兼容方案。
+- **数据库**：SQLite 作为默认演示环境，可无缝切换至 PostgreSQL/MySQL。
+- **大模型/推理**：Ollama、Groq、Fireworks、Hugging Face Inference、vLLM 等提供统一抽象。
+- **日志与监控**：Structlog 输出 JSON 日志；Prometheus 指标与 Alertmanager 告警脚本提供观测性。
+- **自动化与导出**：Playwright + Pyperclip 实现半自动送稿与剪贴板助手；打包导出依赖 zipfile/CSV/JSON 工具集。
+
+### 运行环境概览
+| 分类 | 推荐配置 | 说明 |
+| --- | --- | --- |
+| 操作系统 | macOS / Linux / Windows 10+ | 全部流程均在 Python 用户态运行，无系统专属依赖 |
+| Python 版本 | ≥ 3.11 | 低版本会导致类型注解与 dataclass 功能缺失 |
+| 浏览器 | Chrome 113+ | 供 Playwright 自动化与 CDP 调试使用 |
+| 虚拟环境 | `python -m venv .venv` | 避免污染系统包，便于隔离依赖 |
+| Node.js（可选） | 18+ | 仅在需要扩展前端 Dashboard 时使用 |
+| 额外工具 | `make`、`zip`、`sqlite3` | 常见 Unix 工具，便于调试与导出 |
+
 ### 功能要点
 - **定时调度**：基于 APScheduler，每日固定时间自动生成并投递内容。
 - **去重检查**：以关键词集合和数据库记录避免重复发文。
@@ -19,6 +38,13 @@ AutoWriter 是一套自动写作骨架，目标是每天根据计划生成约 20
 
 ## 2. 最终愿景与产品形象
 AutoWriter 的长期目标是实现「全自动、零干预」的内容生产流水线：系统按日程生成高质量文章，进入人工审核草稿箱，避免重复并支持主题可控。
+
+### Prompt 迭代历程（回顾）
+| Prompt 轮次 | 目标 | 主要产出 |
+| --- | --- | --- |
+| 第 1 轮（R1 骨架） | 打通最小可运行流程 | `app/main.py` 完成生成→去重→投递链路，占位平台适配器就绪 |
+| 第 2 轮（R2 文档/注释） | 强化可维护性 | 代码文件补充逐行中文注释；README 扩写结构化章节与架构草图 |
+| 第 3 轮（当前） | 归档知识与零基础入门 | 汇总技术栈、环境准备、历史 Prompt，补充端到端运行说明并整理操作手册 |
 
 ### 愿景亮点
 - 持续生成高质量、可审稿后发布的草稿。
@@ -165,6 +191,12 @@ OLLAMA_BASE_URL=
 - `jobs/job.schema.json`（仅 orchestrator + VPS 模式使用）：若需扩展下发字段（如新增渠道参数），请遵循 JSON Schema 更新并同步 orchestrator/worker。
 
 ## 5. 运行与调度
+### 项目使用方式概览
+- **一次性生成并投递**：`python app/main.py --topic "示例主题"`，适用于快速验证端到端链路。
+- **批量生成与自动导出**：`python main.py`（交互式向导）按步骤配置 Provider、批量大小、送稿参数，随后调用 `autowriter_text` 管道生成素材。
+- **导出与送稿辅助**：`python cli.py export|copy|auto ...` 对应生成素材包、手动剪贴板和自动化草稿录入三类场景。
+- **守护式调度**：`python -m app.scheduler` 或系统 cron 按计划运行 `app/main.py`。
+
 ### 本地一次性运行
 ```bash
 python app/main.py --topic "示例主题"
@@ -186,6 +218,27 @@ make run
 - `runs` 表记录每次执行状态，可在调度前检查是否已有成功记录。
 - `platform_logs`（预留）可写入投递结果，用于判断是否需要重试。
 - 结合 `articles`/`keywords` 唯一约束，避免重复写入同一篇文章。
+
+### 从启动到完成的端到端流程拆解
+以下步骤解释 `python app/main.py --topic "示例主题"` 时后台具体调用链，适合零基础读者对照源码理解：
+1. **命令行入口**（`app/main.py`）
+   1. `argparse` 解析 `--topic` 参数，默认值为 “AI 技术趋势”。
+   2. `main()` 函数写入结构化日志并调用 `init_database()` 确保 SQLite/外部数据库存在所需表结构。
+2. **文章生成阶段**
+   1. 构造 `ArticleGenerator`（`app/generator/article_generator.py`），传入 `.env` 中配置的 LLM 凭据。
+   2. `generate_article()` 读取 Prompt 模板、合成标题/摘要/正文并返回字典，若 LLM 不可用则返回示例内容。
+3. **重复检测阶段**
+   1. `ArticleDeduplicator.is_unique()`（`app/dedup/deduplicator.py`）比对标题、关键词与历史记录。
+   2. 若命中重复则记录日志并停止流程；否则继续下一步。
+4. **平台投递阶段**
+   1. 根据配置构建 `MediumDeliveryAdapter`、`WordPressDeliveryAdapter`、`WeChatMPDeliveryAdapter` 列表（`app/delivery/*.py`）。
+   2. 循环执行 `adapter.deliver(article_payload)`：当前为占位实现，实际部署时应填充 REST API 或浏览器自动化逻辑。
+   3. 每个平台调用结束后写入 `delivery_success` / `delivery_failed` 日志，并在混沌注入启用时测试限速与异常场景。
+5. **运行收尾**
+   1. 生成器返回的数据会写入 `articles`/`keywords` 表，供 CLI 导出或 Dashboard 展示。
+   2. `main()` 末尾打印“流程结束”日志，调度器据此判断该任务是否成功。
+
+如需深入了解“批量生成→导出→自动送稿”流程，可在完成一次 `app/main.py` 运行后按顺序执行：`python main.py`（交互式批量）、`python cli.py export all`、`python cli.py auto all`，每一步在终端提示所调用的模块和函数，便于逐一对照。
 
 ## 6. 半自动导入（公众号/知乎）
 基于 V7.2 半自动导出方案，可在不调用平台 API 的情况下完成公众号与知乎草稿导入：

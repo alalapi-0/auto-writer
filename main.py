@@ -1,18 +1,26 @@
-"""AutoWriter 交互式主程序入口。"""
+"""AutoWriter 项目的交互式批量运行入口脚本。
+
+该模块提供了一套零基础可用的命令行向导，用于：
+1. 检查当前环境是否满足运行要求（Python 版本、配置文件、数据库等）；
+2. 引导用户逐项填写批量生成配置，并根据选择调用 `autowriter_text` 的流水线；
+3. 在需要时触发 `cli.py` 的自动送稿功能，完成浏览器端草稿创建。
+
+整份脚本强调“能看懂即能运行”，因此每个步骤都辅以中文说明与输入提示。
+"""
 
 from __future__ import annotations
 
-import argparse
-import os
-import sys
-from contextlib import closing
-from pathlib import Path
-from typing import Dict
+import argparse  # 解析命令行参数，用于构建交互式子命令
+import os  # 读取环境变量判断凭据是否就绪
+import sys  # 获取 Python 版本信息并在检查失败时退出
+from contextlib import closing  # 确保数据库连接按上下文安全关闭
+from pathlib import Path  # 统一文件路径处理，兼容多平台
+from typing import Dict  # 标注字典类型，提升函数签名可读性
 
-from autowriter_text.configuration import load_config
-from autowriter_text.db import ensure_schema, get_connection
-from autowriter_text.pipeline.run_batch import run_batch
-from cli import cmd_auto
+from autowriter_text.configuration import load_config  # 加载批量生成所需配置
+from autowriter_text.db import ensure_schema, get_connection  # 初始化并验证数据库结构
+from autowriter_text.pipeline.run_batch import run_batch  # 批量生成管道的入口函数
+from cli import cmd_auto  # 复用 CLI 自动送稿命令，实现“一键生成并投递”
 
 
 def _clear_cached_config() -> None:
@@ -169,16 +177,22 @@ def _check_environment() -> bool:
 def _run_automation_flow() -> None:
     """引导用户选择自动化流程参数。"""
 
+    # 第一步：确认本次要自动操作的平台（公众号/知乎/两者皆是）。
     platform = _prompt_choice(
         "请选择要自动化的平台:",
         {"wechat": "微信公众号", "zhihu": "知乎", "both": "两个平台都执行"},
     )
+    # 支持回放任意日期的导出包，默认为当天生成的素材。
     date_str = _prompt_optional("请输入素材日期 (YYYY-MM-DD 留空代表今日)")
+    # 允许自定义单次批量的篇幅，避免误发过多文章。
     limit = _prompt_int("每个平台投递篇数", 5)
+    # dry_run 可让用户只验证流程而不保存草稿。
     dry_run = _prompt_bool("是否仅演练不提交", False)
+    # 控制重试次数与跨篇等待，防止频繁触发验证码。
     max_retries = _prompt_int("单篇最大重试次数", 3)
     min_interval = _prompt_float("跨篇最短等待 (秒)", 6.0)
     max_interval = _prompt_float("跨篇最长等待 (秒)", 12.0)
+    # 通过 CDP 地址连接到已登录的本机浏览器。
     cdp_url = _prompt_optional("Chrome DevTools 连接地址", "http://127.0.0.1:9222")
 
     args = argparse.Namespace(
@@ -191,6 +205,7 @@ def _run_automation_flow() -> None:
         max_interval=max_interval,
         cdp=cdp_url,
     )
+    # 复用 cli.py 中的自动化命令执行实际的浏览器操作。
     cmd_auto(args)
 
 
@@ -202,6 +217,7 @@ def main() -> None:
         print("环境检查未通过，请根据提示修复后再运行。")
         return
     while True:
+        # 先让用户挑选当前要使用的大模型提供商（本地/云端/VPS）。
         provider = _prompt_choice(
             "请选择要使用的模型提供商:",
             {
@@ -216,6 +232,7 @@ def main() -> None:
                 "hf_endpoint": "Hugging Face Endpoint",
             },
         )
+        # 将选择写入环境变量，并清空配置缓存以重新加载。
         os.environ["AUTOWRITER_LLM_PROVIDER"] = provider
         _clear_cached_config()
         config = load_config()
@@ -225,6 +242,7 @@ def main() -> None:
         )
         _warn_missing_credentials(provider)
 
+        # 接着选择执行批量生成、浏览器自动化或直接退出。
         action = _prompt_choice(
             "请选择要执行的操作:",
             {"generate": "运行批量生成", "auto": "执行投放自动化", "exit": "退出程序"},
@@ -238,6 +256,7 @@ def main() -> None:
             print("感谢使用，再见！")
             break
 
+        # 完成一次任务后可选择继续，方便连贯操作。
         if not _prompt_bool("是否继续执行其他操作?", True):
             print("感谢使用，再见！")
             break
